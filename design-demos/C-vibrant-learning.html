@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Direction C · Vibrant Learning</title>
+<style>
+  /* ============ Direction C · Vibrant Learning ============
+     活力鼓励 · 靛蓝+暖珊瑚 · 圆润友好(语言学习 app 气质)
+     布局差异:胶囊顶栏悬浮、右侧面板卡片化悬浮、进度环 */
+  :root {
+    --bg: #f4f5fb;
+    --surface: #ffffff;
+    --ink: #211f36;
+    --ink-2: #6f6c88;
+    --line: #ebecf6;
+    --indigo: #5b5bd6;
+    --coral: #f2683c;
+    --mint: #17b890;
+    --amber: #f4b942;
+    --r: 18px;
+    font-family: "Inter", -apple-system, "Segoe UI", "PingFang SC", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); height: 100vh; overflow: hidden; font-size: 14px; }
+  .app { height: 100vh; display: flex; flex-direction: column; padding: 12px; gap: 12px; }
+
+  .top { display: flex; align-items: center; gap: 12px; padding: 9px 14px; background: var(--surface); border-radius: 16px; box-shadow: 0 2px 16px rgba(40,40,90,.06); }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 15px; }
+  .logo { width: 30px; height: 30px; border-radius: 10px; background: linear-gradient(135deg, var(--indigo), #8183e8); color:#fff; display:grid; place-items:center; font-size:16px; box-shadow:0 4px 12px rgba(91,91,214,.35);}
+  .book { font-size: 12.5px; color: var(--ink-2); padding-left: 12px; }
+  .spacer { flex: 1; }
+  .cap { display:flex; align-items:center; background:var(--bg); border-radius:999px; padding:3px; gap:2px;}
+  .cap .ib { border:none; background:transparent; width:28px; height:28px; border-radius:999px; cursor:pointer; color:var(--ink-2); font-size:14px;}
+  .cap .ib:hover{ background:#fff;}
+  .pg { font-size:13px; font-weight:700; padding:0 8px;}
+  .rbtn { border:none; border-radius:999px; padding:8px 15px; font-size:13px; font-weight:600; cursor:pointer;}
+  .rbtn.ghost { background:var(--bg); color:var(--ink); }
+  .rbtn.coral { background:var(--coral); color:#fff; box-shadow:0 4px 14px rgba(242,104,60,.35);}
+  .streak { display:flex; align-items:center; gap:6px; background:#fff5e9; color:#c67a17; border-radius:999px; padding:6px 13px; font-size:13px; font-weight:700;}
+
+  .body { flex: 1; display: flex; gap: 12px; min-height: 0; }
+  .read { flex: 1; overflow-y: auto; background: var(--surface); border-radius: var(--r); box-shadow: 0 2px 16px rgba(40,40,90,.05); display:flex; justify-content:center; padding: 40px 24px; }
+  .doc { width: 620px; position: relative; }
+  .kicker { display:inline-block; background:#edefff; color:var(--indigo); font-size:12px; font-weight:700; padding:5px 13px; border-radius:999px; margin-bottom:16px;}
+  .doc h1 { font-size: 29px; line-height:1.2; margin-bottom:22px; letter-spacing:-.02em; }
+  .doc p { font-size:16.5px; line-height:1.85; margin-bottom:18px; color:#38364f; text-wrap:pretty;}
+  .play { position:absolute; left:-14px; width:30px; height:30px; border-radius:50%; border:none; background:var(--bg); color:var(--indigo); cursor:pointer; font-size:11px; box-shadow:0 2px 8px rgba(40,40,90,.08);}
+  .play:hover{ background:var(--indigo); color:#fff;}
+  mark.hint { background: linear-gradient(transparent 62%, #ffe08a 62%); }
+  .wsel { background: #e3e3fb; border-radius:5px; padding:0 2px;}
+
+  .side { width: 35%; min-width: 350px; max-width: 450px; display: flex; flex-direction: column; gap: 12px; }
+  .tabs { display:flex; gap:6px; background:var(--surface); border-radius:14px; padding:6px; box-shadow:0 2px 16px rgba(40,40,90,.05);}
+  .tab { flex:1; text-align:center; padding:9px 0; font-size:13px; color:var(--ink-2); cursor:pointer; border-radius:10px; font-weight:600;}
+  .tab.on { background:var(--indigo); color:#fff; box-shadow:0 4px 12px rgba(91,91,214,.3);}
+  .panel { flex:1; overflow-y:auto; background:var(--surface); border-radius:var(--r); box-shadow:0 2px 16px rgba(40,40,90,.05); padding:18px; }
+  .sec-h { font-size:13px; font-weight:800; margin-bottom:12px; display:flex; align-items:center; gap:8px;}
+  .sec-h .em { font-size:15px;}
+  .card { border:1.5px solid var(--line); border-radius:14px; padding:13px 15px; margin-bottom:10px; transition:.15s;}
+  .card:hover { border-color:#d3d5ee; box-shadow:0 4px 14px rgba(40,40,90,.06);}
+  .w { font-weight:800; font-size:16px; }
+  .ph { color:var(--ink-2); font-size:12.5px; margin-left:7px; }
+  .m { font-size:13.5px; color:#454263; margin-top:5px; line-height:1.55;}
+  .acts { margin-top:10px; display:flex; gap:8px;}
+  .chip { border:none; border-radius:999px; padding:5px 13px; font-size:12.5px; font-weight:600; cursor:pointer; background:var(--bg); color:var(--ink-2);}
+  .chip.save { background:#edefff; color:var(--indigo);}
+  .chip:hover{ filter:brightness(.97);}
+  .sec { margin-bottom:22px; }
+  .prow { display:flex; justify-content:space-between; gap:12px; padding:9px 12px; margin-bottom:6px; background:var(--bg); border-radius:10px; font-size:13.5px;}
+  .prow span { color:var(--ink-2);}
+  /* progress card */
+  .prog { background:linear-gradient(135deg,#5b5bd6,#7c7ee6); border-radius:var(--r); padding:16px 18px; color:#fff; box-shadow:0 6px 20px rgba(91,91,214,.28);}
+  .prog .row { display:flex; align-items:center; gap:14px;}
+  .ring { width:56px; height:56px; border-radius:50%; background:conic-gradient(#ffd580 76%, rgba(255,255,255,.25) 0); display:grid; place-items:center; flex-shrink:0;}
+  .ring i { width:42px; height:42px; border-radius:50%; background:#6060d4; display:grid; place-items:center; font-style:normal; font-weight:800; font-size:14px;}
+  .prog .t { font-size:12.5px; opacity:.9;}
+  .prog .big { font-size:19px; font-weight:800; margin-top:2px;}
+  .prog .sub { font-size:12px; opacity:.85; margin-top:2px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="brand"><span class="logo">✦</span> Immersive Reader</div>
+    <div class="book">Beyond Feelings: A Guide to Critical Thinking</div>
+    <div class="spacer"></div>
+    <div class="streak">🔥 7-day streak</div>
+    <div class="cap"><button class="ib">‹</button><span class="pg">12 / 240</span><button class="ib">›</button></div>
+    <button class="rbtn ghost">Read aloud</button>
+    <button class="rbtn coral">Review · 6</button>
+  </div>
+
+  <div class="body">
+    <div class="read">
+      <div class="doc">
+        <div class="kicker">Chapter 2 · The Basis of Belief</div>
+        <h1>How Free Is Your Thinking?</h1>
+        <button class="play" style="top:120px">▶</button>
+        <p>Critical thinking is the process of evaluating ideas and information to reach <span class="wsel">well-founded</span> conclusions. It requires us to question our <mark class="hint">assumptions</mark>, examine evidence carefully, and remain open to perspectives that differ from our own.</p>
+        <button class="play" style="top:242px">▶</button>
+        <p>The <mark class="hint">undisciplined</mark> mind accepts whatever it encounters; the disciplined mind tests each claim before embracing it. To think well is not to be clever, but to be honest about what we do not yet know.</p>
+        <button class="play" style="top:388px">▶</button>
+        <p>Many of our opinions are not really ours at all. They were absorbed, uncritically, from the surrounding culture before we could <mark class="hint">scrutinize</mark> them.</p>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="tabs">
+        <div class="tab on">Analysis</div>
+        <div class="tab">AI Chat</div>
+        <div class="tab">Progress</div>
+      </div>
+      <div class="prog">
+        <div class="row">
+          <div class="ring"><i>76%</i></div>
+          <div>
+            <div class="t">Today's goal</div>
+            <div class="big">19 / 25 words</div>
+            <div class="sub">6 more to keep your streak alive</div>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="sec">
+          <div class="sec-h"><span class="em">📌</span> Likely New Words</div>
+          <div class="card">
+            <div><span class="w">assumptions</span><span class="ph">/əˈsʌmpʃənz/</span></div>
+            <div class="m">被视为理所当然、未经证明就接受的看法或前提。</div>
+            <div class="acts"><button class="chip save">★ Save</button><button class="chip">I know this</button><button class="chip">Ask AI</button></div>
+          </div>
+          <div class="card">
+            <div><span class="w">scrutinize</span><span class="ph">/ˈskruːtənaɪz/</span></div>
+            <div class="m">仔细审查、反复推敲,以发现问题或真相。</div>
+            <div class="acts"><button class="chip save">★ Save</button><button class="chip">I know this</button><button class="chip">Ask AI</button></div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><span class="em">🔗</span> Phrases & Collocations</div>
+          <div class="prow"><b>reach a conclusion</b><span>得出结论</span></div>
+          <div class="prow"><b>remain open to</b><span>对…保持开放</span></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+</body>
+</html>

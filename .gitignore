@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+e2e-shots*/
+*.log
+.DS_Store
+# prebuild 时从 node_modules 自动复制,不入库
+public/cmaps/
+public/standard_fonts/
+.claude/

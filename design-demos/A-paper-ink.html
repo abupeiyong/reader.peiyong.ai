@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Direction A · Paper & Ink</title>
+<style>
+  /* ============ Direction A · Paper & Ink ============
+     暖色纸墨 · 衬线标题 · 安静沉浸,像高端电子书阅读器 */
+  :root {
+    --paper: #f4f0e5;
+    --paper-2: #fbf9f3;
+    --ink: #2b2620;
+    --ink-soft: #6b6152;
+    --line: #e2dccb;
+    --accent: #7c5b3b;      /* 赭石墨 */
+    --accent-2: #3f6b52;    /* 深松绿 */
+    --hi: #e9c46a;
+    --shadow: 0 2px 20px rgba(60,48,28,.10);
+    font-family: -apple-system, "Segoe UI", "PingFang SC", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #ded7c6; color: var(--ink); height: 100vh; overflow: hidden; }
+  .serif { font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", serif; }
+
+  .app { height: 100vh; display: flex; flex-direction: column; }
+
+  /* top bar */
+  .top {
+    display: flex; align-items: center; gap: 14px;
+    padding: 11px 20px; background: var(--paper-2);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 600; }
+  .brand .mark { font-size: 19px; }
+  .brand .name { font-size: 15px; letter-spacing: .01em; }
+  .divider { width: 1px; height: 22px; background: var(--line); }
+  .book-title { font-size: 14px; color: var(--ink-soft); max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .spacer { flex: 1; }
+  .nav-group { display: flex; align-items: center; gap: 2px; }
+  .icon-btn {
+    border: none; background: transparent; color: var(--ink-soft);
+    width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-size: 14px;
+    display: grid; place-items: center;
+  }
+  .icon-btn:hover { background: #efeadd; color: var(--ink); }
+  .page-field {
+    width: 46px; text-align: center; padding: 4px 0; font-size: 13px;
+    border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink);
+  }
+  .muted { color: var(--ink-soft); font-size: 13px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--paper-2);
+    color: var(--ink-soft); font-size: 13px; cursor: pointer;
+  }
+  .pill:hover { border-color: var(--accent); color: var(--accent); }
+  .pill.solid { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .search { width: 150px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: #fff; font-size: 13px; }
+
+  /* body */
+  .body { flex: 1; display: flex; min-height: 0; }
+
+  /* reading */
+  .read { flex: 1; overflow-y: auto; background: #e6dfcd; display: flex; justify-content: center; padding: 34px 20px; }
+  .sheet {
+    width: 640px; background: var(--paper-2); border-radius: 4px;
+    box-shadow: 0 6px 34px rgba(50,38,20,.16); padding: 62px 66px; position: relative;
+  }
+  .sheet::before { content:""; position:absolute; inset:0; border:1px solid rgba(255,255,255,.5); border-radius:4px; pointer-events:none;}
+  .chap { font-size: 12px; letter-spacing: .22em; text-transform: uppercase; color: var(--accent); margin-bottom: 20px; }
+  .sheet h1 { font-size: 31px; line-height: 1.2; margin-bottom: 26px; font-weight: 600; }
+  .sheet p { font-size: 17.5px; line-height: 1.85; margin-bottom: 20px; text-wrap: pretty; color: #35302a; }
+  .play-para { position: absolute; left: -30px; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line); background: #fff; color: var(--accent); font-size: 10px; display: grid; place-items: center; cursor: pointer; opacity: .5; }
+  .play-para:hover { opacity: 1; }
+  mark.hint { background: none; border-bottom: 2px dotted var(--hi); }
+  .wsel { background: rgba(124,91,59,.14); border-radius: 3px; padding: 0 1px; }
+
+  /* side panel */
+  .side { width: 33%; min-width: 340px; max-width: 430px; background: var(--paper-2); border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .tab { flex: 1; padding: 13px 0; text-align: center; font-size: 13.5px; color: var(--ink-soft); cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .panel { flex: 1; overflow-y: auto; padding: 20px; }
+  .sec-h { font-family: inherit; font-size: 13px; letter-spacing: .04em; color: var(--accent-2); text-transform: uppercase; margin: 0 0 12px; font-weight: 700; }
+  .voc { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 11px; background: #fff; }
+  .voc .w { font-family: inherit; font-weight: 700; font-size: 16px; }
+  .voc .ph { color: var(--ink-soft); font-size: 12.5px; margin-left: 7px; }
+  .voc .m { font-size: 13.5px; color: #4a4238; margin-top: 4px; }
+  .voc .acts { margin-top: 9px; display: flex; gap: 14px; }
+  .link { color: var(--accent); font-size: 12.5px; cursor: pointer; background: none; border: none; padding: 0; }
+  .link:hover { text-decoration: underline; }
+  .sec { margin-bottom: 26px; }
+  .phrase { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 13.5px; }
+  .phrase b { font-weight: 600; }
+  .phrase span { color: var(--ink-soft); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="brand"><span class="mark serif">✦</span><span class="name serif">Immersive Reader</span></div>
+    <div class="divider"></div>
+    <div class="book-title">Beyond Feelings: A Guide to Critical Thinking</div>
+    <div class="spacer"></div>
+    <div class="nav-group">
+      <button class="icon-btn">‹</button>
+      <input class="page-field" value="12">
+      <span class="muted">/ 240</span>
+      <button class="icon-btn">›</button>
+    </div>
+    <div class="divider"></div>
+    <input class="search" placeholder="Search text…">
+    <button class="pill">💡 Hints On</button>
+    <button class="pill">Read aloud</button>
+    <button class="pill solid">Review · 6</button>
+  </div>
+
+  <div class="body">
+    <div class="read">
+      <div class="sheet">
+        <div class="chap serif">Chapter Two · The Basis of Belief</div>
+        <h1 class="serif">How Free Is Your Thinking?</h1>
+        <button class="play-para" style="top:150px">▶</button>
+        <p>Critical thinking is the process of evaluating ideas and information to reach <span class="wsel">well-founded</span> conclusions. It requires us to question our <mark class="hint">assumptions</mark>, examine evidence carefully, and remain open to perspectives that differ from our own.</p>
+        <button class="play-para" style="top:280px">▶</button>
+        <p>The <mark class="hint">undisciplined</mark> mind accepts whatever it encounters; the disciplined mind tests each claim before embracing it. To think well is not to be clever, but to be honest about what we do not yet know.</p>
+        <button class="play-para" style="top:430px">▶</button>
+        <p>Many of our opinions are not really ours at all. They were absorbed, uncritically, from family, friends, and the surrounding culture long before we had the capacity to <mark class="hint">scrutinize</mark> them.</p>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="tabs">
+        <div class="tab on serif">Analysis</div>
+        <div class="tab serif">AI Chat</div>
+        <div class="tab serif">My Learning</div>
+      </div>
+      <div class="panel">
+        <div class="sec">
+          <h4 class="sec-h">Likely New Words</h4>
+          <div class="voc">
+            <div><span class="w serif">assumptions</span><span class="ph">/əˈsʌmpʃənz/</span></div>
+            <div class="m">被视为理所当然、未经证明就接受的看法或前提。</div>
+            <div class="acts"><button class="link">★ Save</button><button class="link">I know this</button><button class="link">Ask AI</button></div>
+          </div>
+          <div class="voc">
+            <div><span class="w serif">scrutinize</span><span class="ph">/ˈskruːtənaɪz/</span></div>
+            <div class="m">仔细审查、反复推敲,以发现问题或真相。</div>
+            <div class="acts"><button class="link">★ Save</button><button class="link">I know this</button><button class="link">Ask AI</button></div>
+          </div>
+        </div>
+        <div class="sec">
+          <h4 class="sec-h">Phrases & Collocations</h4>
+          <div class="phrase"><b>reach a conclusion</b><span>得出结论</span></div>
+          <div class="phrase"><b>remain open to</b><span>对…保持开放</span></div>
+          <div class="phrase"><b>differ from</b><span>与…不同</span></div>
+        </div>
+        <div class="sec">
+          <h4 class="sec-h">Background</h4>
+          <p style="font-size:13.5px;line-height:1.7;color:#4a4238">本章探讨批判性思维的起点:认识到我们许多信念是被文化无意识塑造的,只有主动审视才能真正拥有自己的判断。</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+</body>
+</html>

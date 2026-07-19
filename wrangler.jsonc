@@ -1,0 +1,58 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "reader-peiyong-ai",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    { "pattern": "reader.peiyong.ai", "custom_domain": true }
+  ],
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "reader-db",
+      "database_id": "c3467faf-2800-45ab-9e27-c4ed32d89a86",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "reader-files"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "reader-vec"
+    }
+  ],
+  "vars": {
+    "APP_ENV": "production",
+    // Google OAuth:部署时通过 secret 配置 GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET;
+    // 未配置时后端自动启用临时 dev 登录(输入邮箱直接登录)。
+    "GOOGLE_CLIENT_ID": "607995281562-ehieldaudb87b6bov2j07gfshigdaask.apps.googleusercontent.com",
+    "APP_ORIGIN": "https://reader.peiyong.ai",
+    // 查词/解析/对话优先用 gpt-5-nano(OpenAI 兼容网关);OPENAI_API_KEY 走 secret
+    "OPENAI_BASE_URL": "https://api.openai.com/v1",
+    "OPENAI_CHAT_MODEL": "gpt-5-nano",
+    // Telegram Bot(token/webhook secret 走 wrangler secret)
+    "TELEGRAM_BOT_USERNAME": "reader_peiyong_ai_bot",
+    "APP_URL": "https://reader.peiyong.ai"
+  },
+  "triggers": {
+    // 每小时触发,按用户设定的 UTC 小时推送每日复习提醒(Telegram)
+    "crons": ["0 * * * *"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}
