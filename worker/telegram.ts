@@ -1,7 +1,9 @@
 // Telegram Bot:绑定、消息处理、每日推送。
 // 未配置 TELEGRAM_BOT_TOKEN 时全部功能优雅关闭。
 import type { Env } from "./env";
+import type { WordExplanation } from "../shared/types";
 import { openaiChat } from "./openai";
+import { explainWord } from "./ai";
 import { now } from "./util";
 
 const API = "https://api.telegram.org";
@@ -121,18 +123,56 @@ export async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
   await sendMessage(env, chatId, reply ? esc(reply) : "AI is unavailable right now, please try again later.");
 }
 
+type VocabRow = { id: string; word: string; context_sentence: string | null; explanation_json: string | null };
+
+/** 复习词渲染成「单词 音标 词性 + 中文释义 + 原句」;缺释义的按需 AI 生成并写回缓存(mock 不缓存) */
+async function vocabLines(env: Env, userId: string, rows: VocabRow[]): Promise<string[]> {
+  const level =
+    (await env.DB.prepare("SELECT english_level FROM users WHERE id = ?").bind(userId).first<{ english_level: string | null }>())
+      ?.english_level ?? "intermediate";
+  const lines: string[] = [];
+  for (const r of rows) {
+    let exp: WordExplanation | null = null;
+    if (r.explanation_json) {
+      try {
+        exp = JSON.parse(r.explanation_json) as WordExplanation;
+      } catch {
+        /* 缓存损坏则重新生成 */
+      }
+    }
+    if (!exp) {
+      const generated = await explainWord(env, r.word, r.context_sentence ?? "", level);
+      if (generated.source !== "mock") {
+        exp = generated;
+        await env.DB.prepare("UPDATE vocab SET explanation_json = ? WHERE id = ?")
+          .bind(JSON.stringify(generated), r.id)
+          .run()
+          .catch(() => {});
+      }
+    }
+    let line = `• <b>${esc(r.word)}</b>`;
+    if (exp?.phonetic) line += ` ${esc(exp.phonetic)}`;
+    if (exp?.pos) line += ` <i>${esc(exp.pos)}</i>`;
+    const meaning = exp?.meaning_zh || exp?.meaning_in_context;
+    if (meaning) line += `\n  ${esc(meaning.slice(0, 80))}`;
+    if (r.context_sentence) line += `\n  <i>“${esc(r.context_sentence.trim().slice(0, 120))}”</i>`;
+    lines.push(line);
+  }
+  return lines;
+}
+
 async function sendReviewList(env: Env, userId: string, chatId: string): Promise<void> {
   const { results } = await env.DB.prepare(
-    "SELECT word, context_sentence FROM vocab WHERE user_id = ? AND status != 'known' AND (due_at IS NULL OR due_at <= ?) ORDER BY due_at LIMIT 12"
+    "SELECT id, word, context_sentence, explanation_json FROM vocab WHERE user_id = ? AND status != 'known' AND (due_at IS NULL OR due_at <= ?) ORDER BY due_at LIMIT 12"
   )
     .bind(userId, now())
-    .all<{ word: string; context_sentence: string | null }>();
+    .all<VocabRow>();
   if (results.length === 0) {
     await sendMessage(env, chatId, "No words due for review right now. 🎉");
     return;
   }
-  const lines = results.map((r) => `• <b>${esc(r.word)}</b>${r.context_sentence ? `\n  <i>${esc(r.context_sentence.slice(0, 100))}</i>` : ""}`);
-  await sendMessage(env, chatId, `📝 <b>${results.length} word(s) to review:</b>\n\n${lines.join("\n")}\n\nReview in the app to schedule them: ${appUrl(env)}`);
+  const lines = await vocabLines(env, userId, results);
+  await sendMessage(env, chatId, `📝 <b>${results.length} word(s) to review:</b>\n\n${lines.join("\n\n")}\n\nReview in the app to schedule them: ${appUrl(env)}`);
 }
 
 function appUrl(env: Env): string {
@@ -167,10 +207,10 @@ export async function runDailyPush(env: Env): Promise<void> {
 async function pushDaily(env: Env, userId: string, chatId: string): Promise<void> {
   // 待复习词
   const { results: due } = await env.DB.prepare(
-    "SELECT word FROM vocab WHERE user_id = ? AND status != 'known' AND (due_at IS NULL OR due_at <= ?) ORDER BY due_at LIMIT 8"
+    "SELECT id, word, context_sentence, explanation_json FROM vocab WHERE user_id = ? AND status != 'known' AND (due_at IS NULL OR due_at <= ?) ORDER BY due_at LIMIT 8"
   )
     .bind(userId, now())
-    .all<{ word: string }>();
+    .all<VocabRow>();
 
   // 最近在读的书
   const reading = await env.DB.prepare(
@@ -182,8 +222,8 @@ async function pushDaily(env: Env, userId: string, chatId: string): Promise<void
 
   let msg = "📖 <b>Daily review</b>\n\n";
   if (due.length) {
-    msg += `You have <b>${due.length}</b> word(s) to review today:\n`;
-    msg += due.map((d) => `• ${esc(d.word)}`).join("\n");
+    msg += `You have <b>${due.length}</b> word(s) to review today:\n\n`;
+    msg += (await vocabLines(env, userId, due)).join("\n\n");
     msg += "\n\n";
   } else {
     msg += "No words are due today — your queue is clear. 🎉\n\n";
