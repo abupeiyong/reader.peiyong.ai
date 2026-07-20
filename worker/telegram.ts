@@ -156,9 +156,26 @@ async function vocabLines(env: Env, userId: string, rows: VocabRow[]): Promise<s
     const meaning = exp?.meaning_zh || exp?.meaning_in_context;
     if (meaning) line += `\n  ${esc(meaning.slice(0, 80))}`;
     if (r.context_sentence) line += `\n  <i>“${esc(r.context_sentence.trim().slice(0, 120))}”</i>`;
+    const example = exp?.examples?.[0];
+    if (example) line += `\n  e.g. ${esc(example.trim().slice(0, 160))}`;
     lines.push(line);
   }
   return lines;
+}
+
+/** 超过 Telegram 单条 4096 字符限制时,按空行边界分多条发送 */
+async function sendChunked(env: Env, chatId: string, text: string): Promise<void> {
+  if (text.length <= 4000) return sendMessage(env, chatId, text);
+  let buf = "";
+  for (const block of text.split("\n\n")) {
+    if (buf && buf.length + block.length + 2 > 4000) {
+      await sendMessage(env, chatId, buf);
+      buf = block;
+    } else {
+      buf = buf ? `${buf}\n\n${block}` : block;
+    }
+  }
+  if (buf) await sendMessage(env, chatId, buf);
 }
 
 async function sendReviewList(env: Env, userId: string, chatId: string): Promise<void> {
@@ -172,7 +189,7 @@ async function sendReviewList(env: Env, userId: string, chatId: string): Promise
     return;
   }
   const lines = await vocabLines(env, userId, results);
-  await sendMessage(env, chatId, `📝 <b>${results.length} word(s) to review:</b>\n\n${lines.join("\n\n")}\n\nReview in the app to schedule them: ${appUrl(env)}`);
+  await sendChunked(env, chatId, `📝 <b>${results.length} word(s) to review:</b>\n\n${lines.join("\n\n")}\n\nReview in the app to schedule them: ${appUrl(env)}`);
 }
 
 function appUrl(env: Env): string {
@@ -250,5 +267,5 @@ async function pushDaily(env: Env, userId: string, chatId: string): Promise<void
   }
 
   msg += `Open the app to continue: ${appUrl(env)}`;
-  await sendMessage(env, chatId, msg);
+  await sendChunked(env, chatId, msg);
 }
