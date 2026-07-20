@@ -8,6 +8,7 @@ import { computeFeedback } from "./feedback";
 import { estimateVocabRank, hintsForText, applyReview, priorRank, type ReviewGrade } from "./vocabmodel";
 import { wordRank } from "./wordfreq";
 import { telegramEnabled, getBotUsername, handleUpdate, runDailyPush } from "./telegram";
+import { generateCover } from "./cover";
 import type { ChatScope } from "../shared/types";
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -98,7 +99,7 @@ api.patch("/me", async (c) => {
 
 api.get("/books", async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT b.id, b.title, b.filename, b.size, b.page_count, b.status, b.created_at,
+    `SELECT b.id, b.title, b.filename, b.size, b.page_count, b.status, b.created_at, b.cover_key,
             rp.page_no AS progress_page
      FROM books b
      LEFT JOIN reading_progress rp ON rp.book_id = b.id AND rp.user_id = b.user_id
@@ -133,7 +134,7 @@ api.post("/books", async (c) => {
 async function getBook(c: { env: Env }, userId: string, bookId: string) {
   return c.env.DB.prepare("SELECT * FROM books WHERE id = ? AND user_id = ?")
     .bind(bookId, userId)
-    .first<{ id: string; title: string; r2_key: string; page_count: number; status: string }>();
+    .first<{ id: string; title: string; r2_key: string; page_count: number; status: string; cover_key: string | null }>();
 }
 
 api.get("/books/:id", async (c) => {
@@ -142,10 +143,51 @@ api.get("/books/:id", async (c) => {
   return c.json(book);
 });
 
+// 改书名
+api.patch("/books/:id", async (c) => {
+  const book = await getBook(c, c.get("userId"), c.req.param("id"));
+  if (!book) return c.json({ error: "not found" }, 404);
+  const body = await c.req.json<{ title?: string }>().catch(() => ({} as { title?: string }));
+  const title = (body.title ?? "").trim().slice(0, 200);
+  if (!title) return c.json({ error: "书名不能为空" }, 400);
+  await c.env.DB.prepare("UPDATE books SET title = ? WHERE id = ?").bind(title, book.id).run();
+  return c.json({ ok: true, title });
+});
+
+// 生成/重新生成封面(上传完成后前端调用一次;编辑弹窗 Regenerate 也走这里)
+api.post("/books/:id/cover", async (c) => {
+  const book = await getBook(c, c.get("userId"), c.req.param("id"));
+  if (!book) return c.json({ error: "not found" }, 404);
+  const cover = await generateCover(c.env, book.title, now());
+  const key = `covers/${c.get("userId")}/${book.id}-${now()}.${cover.ext}`;
+  await c.env.BUCKET.put(key, cover.bytes, { httpMetadata: { contentType: cover.contentType } });
+  if (book.cover_key) {
+    const old = book.cover_key;
+    c.executionCtx.waitUntil(c.env.BUCKET.delete(old).catch(() => {}));
+  }
+  await c.env.DB.prepare("UPDATE books SET cover_key = ? WHERE id = ?").bind(key, book.id).run();
+  return c.json({ cover_key: key });
+});
+
+api.get("/books/:id/cover", async (c) => {
+  const book = await getBook(c, c.get("userId"), c.req.param("id"));
+  if (!book?.cover_key) return c.json({ error: "no cover" }, 404);
+  const obj = await c.env.BUCKET.get(book.cover_key);
+  if (!obj) return c.json({ error: "cover missing" }, 404);
+  return new Response(obj.body, {
+    headers: {
+      "Content-Type": obj.httpMetadata?.contentType ?? "image/jpeg",
+      // key 含时间戳,重新生成会换 URL,可长缓存
+      "Cache-Control": "private, max-age=31536000, immutable",
+    },
+  });
+});
+
 api.delete("/books/:id", async (c) => {
   const book = await getBook(c, c.get("userId"), c.req.param("id"));
   if (!book) return c.json({ error: "not found" }, 404);
   await c.env.BUCKET.delete(book.r2_key);
+  if (book.cover_key) await c.env.BUCKET.delete(book.cover_key).catch(() => {});
   if (c.env.VECTORIZE && book.page_count > 0) {
     const ids = Array.from({ length: book.page_count }, (_, i) => `${book.id}:${i + 1}`);
     c.executionCtx.waitUntil(

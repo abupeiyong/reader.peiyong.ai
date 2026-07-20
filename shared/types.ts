@@ -18,6 +18,7 @@ export interface Book {
   status: "uploaded" | "processing" | "ready" | "failed";
   created_at: number;
   progress_page?: number;
+  cover_key?: string | null;
 }
 
 export interface WordExplanation {

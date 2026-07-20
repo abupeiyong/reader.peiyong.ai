@@ -46,6 +46,37 @@ try {
   ok("上传 PDF 并出现书卡片");
   await shot("02-library-book");
 
+  // 2b. 上传时生成封面
+  await page.waitForSelector(".book-cover-img", { timeout: 20000 });
+  ok("上传后自动生成封面");
+
+  // 2c. 编辑:改书名 + 重新生成封面
+  await page.hover(".book-card");
+  await page.click(".book-edit");
+  await page.waitForSelector(".book-edit-modal", { timeout: 5000 });
+  const newTitle = "E2E Renamed Book";
+  await page.fill(".edit-title-input", newTitle);
+  const oldSrc = await page.getAttribute(".edit-cover img", "src");
+  await page.click(".book-edit-modal >> text=Regenerate cover");
+  await page.waitForFunction(
+    (old) => {
+      const img = document.querySelector(".edit-cover img");
+      return !!img && img.getAttribute("src") !== old;
+    },
+    oldSrc,
+    { timeout: 30000 }
+  );
+  ok("重新生成封面(封面已更新)");
+  await page.click(".book-edit-modal .btn-primary");
+  await page.waitForSelector(".book-edit-modal", { state: "detached", timeout: 5000 });
+  await page.waitForFunction(
+    (t) => document.querySelector(".book-title")?.textContent?.includes(t),
+    newTitle,
+    { timeout: 8000 }
+  );
+  ok("编辑书名生效");
+  await shot("02c-edit-book");
+
   // 3. 打开阅读器
   await page.click(".book-card");
   await page.waitForSelector(".pdf-page-wrap canvas", { timeout: 20000 });

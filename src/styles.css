@@ -143,15 +143,38 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 }
 .book-card:hover { box-shadow: var(--shadow); transform: translateY(-2px); }
 .book-cover {
-  height: 130px; background: linear-gradient(150deg, #7c5b3b 0%, #9c7a52 100%);
+  position: relative; height: 130px; background: linear-gradient(150deg, #7c5b3b 0%, #9c7a52 100%);
   color: #f7f2e6; display: flex; align-items: center; justify-content: center;
   padding: 18px; text-align: center; font-weight: 600; font-size: 15px; font-family: var(--serif);
 }
+.book-cover-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .book-info { padding: 12px 14px; }
 .book-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .book-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
-.book-del { position: absolute; top: 6px; right: 6px; opacity: 0; }
-.book-card:hover .book-del { opacity: 1; }
+.book-del, .book-edit { position: absolute; top: 6px; opacity: 0; background: rgba(247, 242, 230, 0.92); }
+.book-del { right: 6px; }
+.book-edit { right: 44px; }
+.book-card:hover .book-del, .book-card:hover .book-edit { opacity: 1; }
+
+/* ---------- 编辑书籍 modal ---------- */
+
+.book-edit-modal .edit-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.edit-cover {
+  position: relative; align-self: center; width: 150px; height: 200px; border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--border); background: #f1ecdd; display: flex; align-items: center; justify-content: center;
+  color: var(--muted);
+}
+.edit-cover img { width: 100%; height: 100%; object-fit: cover; }
+.edit-cover-busy {
+  position: absolute; inset: 0; background: rgba(40, 32, 18, 0.45); color: #f7f2e6;
+  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;
+}
+.edit-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.edit-title-input {
+  border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; background: #fff; font: inherit;
+}
+.edit-title-input:focus { outline: none; border-color: var(--primary); }
+.edit-actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; }
 
 /* ---------- 阅读页布局 ---------- */
 
