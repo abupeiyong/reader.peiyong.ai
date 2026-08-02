@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env, Vars } from "./env";
 import { authRoutes, requireAuth } from "./auth";
-import { uid, now, tokenizeWords } from "./util";
+import { uid, now, tokenizeWords, fnv1aHex } from "./util";
 import { explainWord, analyzePage, chatStream, transcribeAudio, embedTexts, ttsAudio, ocrImage, readingAdvice } from "./ai";
 import { elevenTts } from "./elevenlabs";
 import { computeFeedback } from "./feedback";
@@ -608,16 +608,48 @@ api.post("/ai/explain-word", async (c) => {
   const user = await c.env.DB.prepare("SELECT english_level FROM users WHERE id = ?")
     .bind(userId)
     .first<{ english_level: string }>();
+  const level = user?.english_level ?? "intermediate";
 
-  // 记录点击行为(用于后续个性化词汇模型)
-  await c.env.DB.prepare(
-    "INSERT INTO word_events (user_id, word, action, book_id, page_no, created_at) VALUES (?, ?, 'click', ?, ?, ?)"
-  )
-    .bind(userId, body.word.toLowerCase(), body.book_id ?? null, body.page_no ?? null, now())
-    .run();
-
+  // 点击行为(词汇模型观测)与活动日志照常记录,不阻塞响应
+  c.executionCtx.waitUntil(
+    c.env.DB.prepare(
+      "INSERT INTO word_events (user_id, word, action, book_id, page_no, created_at) VALUES (?, ?, 'click', ?, ?, ?)"
+    )
+      .bind(userId, body.word.toLowerCase(), body.book_id ?? null, body.page_no ?? null, now())
+      .run()
+      .catch((e) => console.warn("word_events 记录失败:", (e as Error).message))
+  );
   void logActivity(c.env, userId, "lookup", body.book_id ?? null, body.page_no ?? null);
-  const exp = await explainWord(c.env, body.word, body.sentence ?? "", user?.english_level ?? "intermediate");
+
+  // 缓存:同一 (单词, 原句, 水平) 直接复用,重复查询免 AI 调用
+  const cacheWord = body.word.trim().toLowerCase();
+  const sentenceNorm = (body.sentence ?? "").trim().replace(/\s+/g, " ");
+  const sentenceHash = sentenceNorm ? fnv1aHex(sentenceNorm) : "-";
+  const cached = await c.env.DB.prepare(
+    "SELECT explanation_json FROM word_exp_cache WHERE word = ? AND sentence_hash = ? AND level = ?"
+  )
+    .bind(cacheWord, sentenceHash, level)
+    .first<{ explanation_json: string }>();
+  if (cached) {
+    try {
+      return c.json(JSON.parse(cached.explanation_json));
+    } catch {
+      /* 缓存损坏则重新生成 */
+    }
+  }
+
+  const exp = await explainWord(c.env, body.word, body.sentence ?? "", level);
+  if (exp.source !== "mock") {
+    c.executionCtx.waitUntil(
+      c.env.DB.prepare(
+        `INSERT INTO word_exp_cache (word, sentence_hash, level, explanation_json, created_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(word, sentence_hash, level) DO UPDATE SET explanation_json = excluded.explanation_json, created_at = excluded.created_at`
+      )
+        .bind(cacheWord, sentenceHash, level, JSON.stringify(exp), now())
+        .run()
+        .catch((e) => console.warn("查词缓存写入失败:", (e as Error).message))
+    );
+  }
   return c.json(exp);
 });
 

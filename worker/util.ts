@@ -34,3 +34,13 @@ export function splitSentences(text: string): string[] {
 export function tokenizeWords(text: string): string[] {
   return (text.toLowerCase().match(/[a-z']+/g) || []).filter((w) => w.length > 0);
 }
+
+/** FNV-1a 32 位哈希(hex),用于句子等短文本做缓存键 */
+export function fnv1aHex(s: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16);
+}

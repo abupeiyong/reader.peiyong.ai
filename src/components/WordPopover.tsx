@@ -18,6 +18,9 @@ interface Props {
   onAskAI: (word: string, sentence: string) => void;
 }
 
+// 会话内查词缓存:同一 (词, 原句) 重复点击直接复用,零延迟(服务端另有 D1 持久缓存)
+const expCache = new Map<string, WordExplanation>();
+
 export default function WordPopover({ word, sentence, x, y, yTop, bookId, pageNo, onClose, onSaved, onKnown, onAskAI }: Props) {
   const [exp, setExp] = useState<WordExplanation | null>(null);
   const [error, setError] = useState("");
@@ -25,13 +28,24 @@ export default function WordPopover({ word, sentence, x, y, yTop, bookId, pageNo
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setExp(null);
     setSaved(false);
     setError("");
+    const key = `${word.toLowerCase()}|${sentence.trim()}`;
+    const hit = expCache.get(key);
+    if (hit) {
+      setExp(hit);
+      // 缓存命中不走查词接口,补记点击观测(词汇模型用),失败无所谓
+      void api.post("/api/word-events", { word, action: "click", book_id: bookId, page_no: pageNo }).catch(() => {});
+      return;
+    }
+    setExp(null);
     let cancelled = false;
     api
       .post<WordExplanation>("/api/ai/explain-word", { word, sentence, book_id: bookId, page_no: pageNo })
-      .then((e) => !cancelled && setExp(e))
+      .then((e) => {
+        if (e.source !== "mock") expCache.set(key, e);
+        if (!cancelled) setExp(e);
+      })
       .catch((e) => !cancelled && setError((e as Error).message));
     return () => {
       cancelled = true;
