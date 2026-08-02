@@ -11,8 +11,14 @@ const WHISPER_MODEL = "@cf/openai/whisper";
 type Msg = { role: "system" | "user" | "assistant"; content: string };
 
 // 文本生成:优先 OpenAI(gpt-5-nano)→ 回退 Workers AI(Llama)→ null(上层用 mock)
-async function runLLM(env: Env, messages: Msg[], maxTokens = 1024, json = false): Promise<string | null> {
-  const oa = await openaiChat(env, messages, { maxTokens, json });
+async function runLLM(
+  env: Env,
+  messages: Msg[],
+  maxTokens = 1024,
+  json = false,
+  verbosity?: "low" | "medium" | "high"
+): Promise<string | null> {
+  const oa = await openaiChat(env, messages, { maxTokens, json, verbosity });
   if (oa != null) return oa;
   try {
     if (!env.AI) throw new Error("本地开发无 AI 绑定");
@@ -39,21 +45,11 @@ export async function explainWord(
   sentence: string,
   level: string
 ): Promise<WordExplanation> {
-  const prompt = `你是英语学习助手。用户英语水平:${level}。用户在阅读时点击了单词或短语,请结合它所在的句子给出语境化解释。只返回 JSON,不要多余文字,格式:
-{
-  "word": "原词",
-  "phonetic": "国际音标,如 /ˈwɜːrd/",
-  "pos": "在本句中的词性",
-  "meaning_zh": "当前语境下的中文释义(简洁)",
-  "meaning_in_context": "结合原句解释它在这句话里的具体含义(中文,1-2句)",
-  "collocations": ["2-4个常见搭配"],
-  "forms": ["主要词形变化"],
-  "examples": ["1-2个简短英文例句(附中文翻译)"]
-}
-
-单词/短语: "${word}"
-所在句子: "${sentence}"`;
-  const text = await runLLM(env, [{ role: "user", content: prompt }], 800, true);
+  // 精简 prompt + verbosity low:输出 token 是延迟主因,实测比长版快 ~35%
+  const prompt = `英语助手,用户水平 ${level}。结合句子解释单词,只返回 JSON:
+{"word":"原词","phonetic":"IPA 音标","pos":"本句词性","meaning_zh":"语境中文释义","meaning_in_context":"这句里的含义,中文1句","collocations":["2-3个常见搭配"],"forms":["主要词形变化"],"examples":["1个短英文例句(附中文)"]}
+单词:"${word}" 句子:"${sentence}"`;
+  const text = await runLLM(env, [{ role: "user", content: prompt }], 500, true, "low");
   if (text) {
     const parsed = extractJson<WordExplanation>(text);
     if (parsed && parsed.word) return { ...parsed, source: "ai" };

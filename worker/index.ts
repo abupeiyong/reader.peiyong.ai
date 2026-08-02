@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env, Vars } from "./env";
 import { authRoutes, requireAuth } from "./auth";
-import { uid, now, tokenizeWords, fnv1aHex } from "./util";
+import { uid, now, tokenizeWords, fnv1aHex, sha256Hex } from "./util";
 import { explainWord, analyzePage, chatStream, transcribeAudio, embedTexts, ttsAudio, ocrImage, readingAdvice } from "./ai";
 import { elevenTts } from "./elevenlabs";
 import { computeFeedback } from "./feedback";
@@ -522,13 +522,27 @@ api.get("/tts", async (c) => {
   const text = (c.req.query("text") ?? "").slice(0, 800);
   if (!text.trim()) return c.json({ error: "缺少文本" }, 400);
   const accent = c.req.query("accent") === "GB" ? "GB" : "US";
+  const headers = { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" };
+
+  // R2 持久缓存:同一 (口音, 文本) 的音频全局复用,省 ElevenLabs 配额且 ~50ms 返回
+  const key = `tts/${accent}/${await sha256Hex(text.trim().replace(/\s+/g, " ").toLowerCase())}.mp3`;
+  const cached = await c.env.BUCKET.get(key);
+  if (cached) return new Response(cached.body, { headers });
+
   // 优先 ElevenLabs(eleven_v3)→ 回退 Workers AI melotts
-  let audio = await elevenTts(c.env, text, accent);
-  if (!audio) audio = await ttsAudio(c.env, text);
+  const eleven = await elevenTts(c.env, text, accent);
+  if (eleven) {
+    // 只缓存 ElevenLabs 结果;melotts 兜底不缓存,恢复后自动升级音质
+    c.executionCtx.waitUntil(
+      c.env.BUCKET.put(key, eleven, { httpMetadata: { contentType: "audio/mpeg" } }).catch((e) =>
+        console.warn("TTS 缓存写入失败:", (e as Error).message)
+      )
+    );
+    return new Response(eleven as unknown as BodyInit, { headers });
+  }
+  const audio = await ttsAudio(c.env, text);
   if (!audio) return c.json({ error: "TTS 不可用" }, 503);
-  return new Response(audio as unknown as BodyInit, {
-    headers: { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" },
-  });
+  return new Response(audio as unknown as BodyInit, { headers });
 });
 
 api.post("/speech/stt", async (c) => {

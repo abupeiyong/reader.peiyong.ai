@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { WordExplanation } from "../../shared/types";
-import { speakWord } from "../lib/speech";
+import { speakWord, prefetchWordAudio } from "../lib/speech";
 import { Icon } from "./Icon";
 
 interface Props {
@@ -30,6 +30,7 @@ export default function WordPopover({ word, sentence, x, y, yTop, bookId, pageNo
   useEffect(() => {
     setSaved(false);
     setError("");
+    prefetchWordAudio(word); // 与查词并行生成/拉取发音,点喇叭时零等待
     const key = `${word.toLowerCase()}|${sentence.trim()}`;
     const hit = expCache.get(key);
     if (hit) {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { ReviewQueue, WordExplanation } from "../../shared/types";
-import { speakWord } from "../lib/speech";
+import { speakWord, prefetchWordAudio } from "../lib/speech";
 import { Icon } from "./Icon";
 
 type Item = ReviewQueue["items"][number];
@@ -32,6 +32,12 @@ export default function ReviewModal({ onClose, onChanged }: { onClose: () => voi
 
   const current = queue[idx];
   const exp = current ? exps[current.id] ?? parseExp(current.explanation_json) : null;
+
+  // 当前卡出现即预取发音,点喇叭零等待
+  useEffect(() => {
+    if (current) prefetchWordAudio(current.word);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id]);
 
   // 当前卡缺完整释义时按需生成(服务端会写回缓存)
   useEffect(() => {
