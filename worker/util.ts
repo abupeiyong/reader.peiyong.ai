@@ -35,6 +35,15 @@ export function tokenizeWords(text: string): string[] {
   return (text.toLowerCase().match(/[a-z']+/g) || []).filter((w) => w.length > 0);
 }
 
+/** SHA-256 hex(前 40 位),用于 R2 缓存键等需要低碰撞率的场景 */
+export async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 40);
+}
+
 /** FNV-1a 32 位哈希(hex),用于句子等短文本做缓存键 */
 export function fnv1aHex(s: string): string {
   let h = 2166136261;

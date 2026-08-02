@@ -21,6 +21,8 @@ function chatUrl(env: Env): string {
 interface ChatOpts {
   maxTokens?: number;
   json?: boolean;
+  /** gpt-5 系列输出详略;查词等短输出场景用 "low" 降延迟 */
+  verbosity?: "low" | "medium" | "high";
 }
 
 /** 非流式:返回助手文本;失败返回 null 让上层回退 */
@@ -39,6 +41,7 @@ export async function openaiChat(env: Env, messages: Msg[], opts: ChatOpts = {})
         // gpt-5 系列为推理模型:用 max_completion_tokens,并以 minimal 推理换取低延迟
         max_completion_tokens: opts.maxTokens ?? 1024,
         reasoning_effort: "minimal",
+        ...(opts.verbosity ? { verbosity: opts.verbosity } : {}),
         ...(opts.json ? { response_format: { type: "json_object" } } : {}),
       }),
     });

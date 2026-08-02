@@ -186,6 +186,11 @@ export function speakSentences(sentences: string[], opts: TtsOptions): TtsContro
   };
 }
 
+/** 预取单词发音(与查词并行发起):音频进内存缓存,点发音时零等待 */
+export function prefetchWordAudio(word: string, accent: Accent = "US"): void {
+  void fetchTtsUrl(word, accent);
+}
+
 /** 朗读单词/短语:优先云端(ElevenLabs),回退浏览器 */
 export async function speakWord(word: string, accent: Accent = "US"): Promise<void> {
   const url = await fetchTtsUrl(word, accent);
