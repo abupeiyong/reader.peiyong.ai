@@ -5,12 +5,15 @@ import type { PageAnalysis, WordExplanation } from "../shared/types";
 import { extractJson } from "./util";
 import { openaiChat, openaiChatStream } from "./openai";
 
+// 流式聊天兜底仍用 llama(gpt-oss 流式为 Responses 事件流,解析格式不同,暂不切)
 const CHAT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+// 非流式兜底:gpt-oss-120b,实测比 llama-70b 快(~1.7s vs 3.3-4.1s)且质量更好
+const FALLBACK_MODEL = "@cf/openai/gpt-oss-120b";
 const WHISPER_MODEL = "@cf/openai/whisper";
 
 type Msg = { role: "system" | "user" | "assistant"; content: string };
 
-// 文本生成:优先 OpenAI(gpt-5-nano)→ 回退 Workers AI(Llama)→ null(上层用 mock)
+// 文本生成:优先 OpenAI(gpt-5-nano)→ 回退 Workers AI(gpt-oss-120b)→ null(上层用 mock)
 async function runLLM(
   env: Env,
   messages: Msg[],
@@ -22,15 +25,20 @@ async function runLLM(
   if (oa != null) return oa;
   try {
     if (!env.AI) throw new Error("本地开发无 AI 绑定");
-    const res = (await env.AI.run(CHAT_MODEL as Parameters<Ai["run"]>[0], {
-      messages,
-      max_tokens: maxTokens,
-    })) as { response?: unknown };
-    const out = res?.response;
-    // 部分模型在输出 JSON 时会直接返回对象而非字符串
-    if (typeof out === "string") return out;
-    if (out != null) return JSON.stringify(out);
-    return null;
+    // gpt-oss 走 Responses 风格:input 纯文本;输出在 output[].content[].text
+    const input = messages
+      .map((m) => (m.role === "system" ? `[系统指令]\n${m.content}` : m.content))
+      .join("\n\n");
+    const res = (await env.AI.run(FALLBACK_MODEL as Parameters<Ai["run"]>[0], {
+      input,
+      reasoning: { effort: "low" },
+    })) as {
+      output_text?: string;
+      output?: { type?: string; content?: { type?: string; text?: string }[] }[];
+    };
+    const msg = res?.output?.find((o) => o.type === "message");
+    const text = res?.output_text ?? msg?.content?.map((c) => c.text ?? "").join("");
+    return text?.trim() ? text : null;
   } catch (e) {
     console.warn("Workers AI 不可用,回退 mock:", (e as Error).message);
     return null;
