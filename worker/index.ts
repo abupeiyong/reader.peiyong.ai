@@ -446,13 +446,14 @@ api.post("/review/:id/explanation", async (c) => {
 api.get("/stats", async (c) => {
   const userId = c.get("userId");
   const since = now() - 30 * 24 * 3600 * 1000;
+  const tzoff = Number(c.req.query("tzoff") ?? 0); // 分钟(getTimezoneOffset),按用户本地日分桶
   const { results: acts } = await c.env.DB.prepare(
     "SELECT kind, created_at FROM activity WHERE user_id = ? AND created_at >= ? ORDER BY created_at ASC"
   )
     .bind(userId, since)
     .all<{ kind: string; created_at: number }>();
 
-  const dayKey = (ts: number) => new Date(ts).toISOString().slice(0, 10);
+  const dayKey = (ts: number) => new Date(ts - (Number.isFinite(tzoff) ? tzoff : 0) * 60000).toISOString().slice(0, 10);
   const days: Record<string, Record<string, number>> = {};
   for (let i = 29; i >= 0; i--) {
     days[dayKey(now() - i * 24 * 3600 * 1000)] = {};
@@ -471,6 +472,19 @@ api.get("/stats", async (c) => {
     if (has) streak++;
     else if (i > 0) break; // 今天还没学不打断连续
     else if (i === 0 && !has) continue;
+  }
+
+  // 每日阅读时长(近 30 天,active_ms 按本地日聚合)
+  const { results: sessions } = await c.env.DB.prepare(
+    "SELECT started_at, active_ms FROM reading_sessions WHERE user_id = ? AND started_at >= ?"
+  )
+    .bind(userId, since)
+    .all<{ started_at: number; active_ms: number }>();
+  const readMs: Record<string, number> = {};
+  for (const k of Object.keys(days)) readMs[k] = 0;
+  for (const s of sessions) {
+    const k = dayKey(s.started_at);
+    if (k in readMs) readMs[k] += s.active_ms;
   }
 
   const vocabCounts = await c.env.DB.prepare(
@@ -506,6 +520,7 @@ api.get("/stats", async (c) => {
 
   return c.json({
     days: Object.entries(days).map(([date, kinds]) => ({ date, ...kinds })),
+    read_days: Object.entries(readMs).map(([date, ms]) => ({ date, ms })),
     streak,
     vocab: Object.fromEntries(vocabCounts.results.map((r) => [r.status, r.n])),
     due_count: dueCount?.n ?? 0,
