@@ -10,7 +10,7 @@ export default function StatsPanel({ refreshNonce }: { refreshNonce: number }) {
   const [stats, setStats] = useState<Stats | null>(null);
 
   useEffect(() => {
-    api.get<Stats>("/api/stats").then(setStats).catch(() => {});
+    api.get<Stats>(`/api/stats?tzoff=${new Date().getTimezoneOffset()}`).then(setStats).catch(() => {});
   }, [refreshNonce]);
 
   if (!stats) return null;
@@ -19,6 +19,10 @@ export default function StatsPanel({ refreshNonce }: { refreshNonce: number }) {
   const max = Math.max(...totals, 1);
   const maxIdx = totals.indexOf(Math.max(...totals));
   const vocabTotal = Object.values(stats.vocab).reduce((a, b) => a + b, 0);
+  const readDays = stats.read_days ?? [];
+  const todayMs = readDays[readDays.length - 1]?.ms ?? 0;
+  const readMax = Math.max(...readDays.map((d) => d.ms), 1);
+  const readMaxIdx = readDays.findIndex((d) => d.ms === readMax);
 
   return (
     <div className="stats-panel">
@@ -34,6 +38,10 @@ export default function StatsPanel({ refreshNonce }: { refreshNonce: number }) {
         <div className="stat-tile">
           <div className="stat-num">{stats.vocab.known ?? 0}</div>
           <div className="stat-label">Mastered</div>
+        </div>
+        <div className="stat-tile">
+          <div className="stat-num">{fmtDur(todayMs)}</div>
+          <div className="stat-label">Read today</div>
         </div>
         <div className="stat-tile">
           <div className="stat-num">≈{formatRank(stats.vocab_rank)}</div>
@@ -82,6 +90,28 @@ export default function StatsPanel({ refreshNonce }: { refreshNonce: number }) {
           <span>Today</span>
         </div>
       </div>
+
+      {readDays.some((d) => d.ms > 0) && (
+        <div className="chart-block">
+          <div className="chart-title">Reading time — last 30 days</div>
+          <div className="bar-chart" role="img" aria-label="Daily reading time over the last 30 days">
+            {readDays.map((d, i) => (
+              <div key={d.date} className="bar-col">
+                {i === readMaxIdx && d.ms > 0 && <div className="bar-peak-label">{fmtDur(d.ms)}</div>}
+                <div
+                  className={`bar read ${d.ms === 0 ? "empty" : ""}`}
+                  style={{ height: `${Math.max((d.ms / readMax) * 72, d.ms > 0 ? 4 : 2)}px` }}
+                />
+                <div className="bar-tip">{d.date.slice(5)} · {d.ms > 0 ? fmtDur(d.ms) : "No reading"}</div>
+              </div>
+            ))}
+          </div>
+          <div className="bar-axis">
+            <span>{readDays[0]?.date.slice(5)}</span>
+            <span>Today</span>
+          </div>
+        </div>
+      )}
 
       {stats.vocab_trend.length >= 2 && (
         <div className="chart-block">
@@ -143,4 +173,11 @@ function VocabTrendChart({ data }: { data: VocabSnapshot[] }) {
 function formatRank(rank: number): string {
   if (rank >= 1000) return `${(rank / 1000).toFixed(1)}k words`;
   return `${Math.round(rank)} words`;
+}
+
+function fmtDur(ms: number): string {
+  const m = Math.round(ms / 60000);
+  if (ms > 0 && m < 1) return "<1m";
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
 }

@@ -133,6 +133,7 @@ export interface VocabSnapshot {
 
 export interface Stats {
   days: DayStat[];
+  read_days: { date: string; ms: number }[]; // 近 30 天每日阅读时长(本地日)
   streak: number;
   vocab: Record<string, number>;
   due_count: number;

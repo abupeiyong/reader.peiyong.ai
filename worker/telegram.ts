@@ -192,6 +192,12 @@ async function sendReviewList(env: Env, userId: string, chatId: string): Promise
   await sendChunked(env, chatId, `📝 <b>${results.length} word(s) to review:</b>\n\n${lines.join("\n\n")}\n\nReview in the app to schedule them: ${appUrl(env)}`);
 }
 
+function fmtDuration(ms: number): string {
+  const m = Math.round(ms / 60000);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
 function appUrl(env: Env): string {
   return env.APP_URL || env.APP_ORIGIN || "https://reader.peiyong.ai";
 }
@@ -237,7 +243,20 @@ async function pushDaily(env: Env, userId: string, chatId: string): Promise<void
     .bind(userId)
     .first<{ book_id: string; title: string; page_no: number }>();
 
+  // 过去 24 小时阅读时长(避开时区判日问题)
+  const read = await env.DB.prepare(
+    "SELECT SUM(active_ms) AS ms, COUNT(*) AS n FROM reading_sessions WHERE user_id = ? AND started_at >= ?"
+  )
+    .bind(userId, now() - 24 * 3600 * 1000)
+    .first<{ ms: number | null; n: number }>();
+
   let msg = "📖 <b>Daily review</b>\n\n";
+  const readMs = read?.ms ?? 0;
+  if (readMs >= 60000) {
+    msg += `⏱ You read for <b>${fmtDuration(readMs)}</b> in the last 24h (${read!.n} session${read!.n === 1 ? "" : "s"}). Keep it up!\n\n`;
+  } else {
+    msg += "⏱ No reading in the last 24h — even a few pages today counts. 📚\n\n";
+  }
   if (due.length) {
     msg += `You have <b>${due.length}</b> word(s) to review today:\n\n`;
     msg += (await vocabLines(env, userId, due)).join("\n\n");
