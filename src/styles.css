@@ -469,6 +469,24 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .tts-sent { cursor: pointer; border-radius: 4px; padding: 1px 2px; }
 .tts-sent:hover { background: #f1ecdd; }
 .tts-sent.active { background: rgba(233, 196, 106, 0.45); color: var(--text); }
+
+/* 播放进度长条(替代播放时的整段文字) */
+.tts-progress-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 10px; border-top: 1px solid #efe9d9; padding-top: 10px;
+}
+.tts-progress {
+  position: relative; flex: 1; height: 14px; border-radius: 7px;
+  background: #eee8d8; cursor: pointer; overflow: hidden;
+}
+.tts-progress:hover { background: #e7dfc9; }
+.tts-progress-fill {
+  position: absolute; top: 0; left: 0; bottom: 0; border-radius: 7px;
+  background: var(--primary); transition: width 0.25s ease;
+}
+.tts-progress-count {
+  font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 .record-ref { color: #4a4238; }
 .rec-dot { color: var(--danger); font-size: 13px; animation: blink 1.2s step-end infinite; }
 
