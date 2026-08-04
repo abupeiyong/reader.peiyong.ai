@@ -199,20 +199,43 @@ export default function ReadAloudBar({ paragraphs, bookId, pageNo, command, onHi
         <button className="icon-btn tts-close" title="Close" onClick={() => { stop(); onClose(); }}><Icon name="x" /></button>
       </div>
 
-      {(mode === "playing" || mode === "paused") && para && (
-        <div className="tts-sentences">
-          {para.sentences.map((s, i) => (
-            <span
-              key={i}
-              className={`tts-sent ${i === sentIndex ? "active" : ""}`}
-              title="Play from this sentence"
-              onClick={() => play(paraIndex, i)}
+      {(mode === "playing" || mode === "paused") && para && (() => {
+        // 播放进度条:整页模式覆盖全页可读句子,段落模式只覆盖当前段;点击跳到对应句
+        const scope: { p: number; s: number }[] = [];
+        if (pageModeRef.current) {
+          for (let p = 0; p < paragraphs.length; p++) {
+            if (paragraphs[p].sentences.length === 0 || paragraphs[p].text.split(" ").length < 4) continue;
+            for (let s = 0; s < paragraphs[p].sentences.length; s++) scope.push({ p, s });
+          }
+        } else {
+          for (let s = 0; s < para.sentences.length; s++) scope.push({ p: paraIndex, s });
+        }
+        const cur = Math.max(0, scope.findIndex((x) => x.p === paraIndex && x.s === sentIndex));
+        const pct = scope.length ? ((cur + 1) / scope.length) * 100 : 0;
+        const seek = (e: React.MouseEvent<HTMLDivElement>) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const frac = Math.min(0.999, Math.max(0, (e.clientX - rect.left) / rect.width));
+          const target = scope[Math.floor(frac * scope.length)];
+          if (target) play(target.p, target.s);
+        };
+        return (
+          <div className="tts-progress-row">
+            <div
+              className="tts-progress"
+              role="slider"
+              aria-label="Playback position"
+              aria-valuemin={1}
+              aria-valuemax={scope.length}
+              aria-valuenow={cur + 1}
+              title="Click to jump"
+              onClick={seek}
             >
-              {s}{" "}
-            </span>
-          ))}
-        </div>
-      )}
+              <div className="tts-progress-fill" style={{ width: `${pct}%` }} />
+            </div>
+            <span className="tts-progress-count">{cur + 1} / {scope.length}</span>
+          </div>
+        );
+      })()}
 
       {mode === "recording" && para && (
         <div className="tts-sentences record-ref">
