@@ -7,7 +7,7 @@ import { elevenTts } from "./elevenlabs";
 import { computeFeedback } from "./feedback";
 import { estimateVocabRank, hintsForText, applyReview, priorRank, type ReviewGrade } from "./vocabmodel";
 import { wordRank } from "./wordfreq";
-import { telegramEnabled, getBotUsername, handleUpdate, runDailyPush } from "./telegram";
+import { telegramEnabled, handleUpdate, runDailyPush } from "./telegram";
 import { generateCover } from "./cover";
 import type { ChatScope } from "../shared/types";
 
@@ -1033,7 +1033,7 @@ api.delete("/recordings/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-// ---------- Telegram 绑定 / 设置(需登录) ----------
+// ---------- Telegram 每日推送设置(需登录) ----------
 
 api.get("/telegram/status", async (c) => {
   const user = await c.env.DB.prepare(
@@ -1047,16 +1047,6 @@ api.get("/telegram/status", async (c) => {
     daily_enabled: (user?.tg_daily_enabled ?? 0) === 1,
     daily_hour: user?.tg_daily_hour ?? 8,
   });
-});
-
-// 生成绑定码 + 深链
-api.post("/telegram/link", async (c) => {
-  if (!telegramEnabled(c.env)) return c.json({ error: "Telegram 未配置" }, 400);
-  const code = uid("tg");
-  await c.env.DB.prepare("UPDATE users SET telegram_link_code = ? WHERE id = ?").bind(code, c.get("userId")).run();
-  const username = await getBotUsername(c.env);
-  if (!username) return c.json({ error: "无法获取 Bot 用户名" }, 502);
-  return c.json({ code, bot: username, deep_link: `https://t.me/${username}?start=${code}` });
 });
 
 api.post("/telegram/settings", async (c) => {
@@ -1075,13 +1065,6 @@ api.post("/telegram/settings", async (c) => {
     vals.push(c.get("userId"));
     await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
   }
-  return c.json({ ok: true });
-});
-
-api.post("/telegram/unlink", async (c) => {
-  await c.env.DB.prepare("UPDATE users SET telegram_chat_id = NULL, telegram_link_code = NULL, tg_daily_enabled = 0 WHERE id = ?")
-    .bind(c.get("userId"))
-    .run();
   return c.json({ ok: true });
 });
 

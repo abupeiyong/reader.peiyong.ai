@@ -1,10 +1,11 @@
-// Telegram Bot:绑定、消息处理、每日推送。
+// Telegram Bot:登录码、消息处理、每日推送。
 // 未配置 TELEGRAM_BOT_TOKEN 时全部功能优雅关闭。
 import type { Env } from "./env";
 import type { WordExplanation } from "../shared/types";
 import { openaiChat } from "./openai";
 import { explainWord } from "./ai";
 import { now } from "./util";
+import { issueLoginCode, chatAllowed } from "./logincode";
 
 const API = "https://api.telegram.org";
 
@@ -60,25 +61,20 @@ export async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
   const chatId = String(msg.chat.id);
   const text = msg.text.trim();
 
-  // /start <code> 绑定
-  const startMatch = text.match(/^\/start\s+(\S+)/);
-  if (startMatch) {
-    const code = startMatch[1];
-    const user = await env.DB.prepare("SELECT id FROM users WHERE telegram_link_code = ?").bind(code).first<{ id: string }>();
-    if (user) {
-      await env.DB.prepare(
-        "UPDATE users SET telegram_chat_id = ?, telegram_link_code = NULL, tg_daily_enabled = 1 WHERE id = ?"
-      )
-        .bind(chatId, user.id)
-        .run();
-      await sendMessage(
-        env,
-        chatId,
-        "✅ <b>Connected!</b>\nYou'll get a daily review reminder here. Send me any English word or question and I'll help.\n\nCommands: /review — today's words · /help"
-      );
-    } else {
-      await sendMessage(env, chatId, "This link code is invalid or expired. Open the app → Telegram to reconnect.");
+  // /login:发一个一次性登录码(网页端输入即可登录)
+  if (text === "/login" || text.startsWith("/login ")) {
+    if (!(await chatAllowed(env, chatId))) {
+      await sendMessage(env, chatId, "This is a private bot.");
+      return;
     }
+    const issued = await issueLoginCode(env, chatId, null);
+    await sendMessage(
+      env,
+      chatId,
+      "error" in issued
+        ? issued.error
+        : `🔐 Sign-in code: <b>${issued.code}</b>\nValid for 5 minutes. Enter it at ${appUrl(env)}`
+    );
     return;
   }
 
@@ -91,14 +87,14 @@ export async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
       env,
       chatId,
       user
-        ? "Send me an English word for a quick lookup, or ask any question about your reading.\n\n/review — today's review words"
-        : "Welcome to <b>Immersive Reader</b>. Open the app and go to Telegram to connect your account."
+        ? "Send me an English word for a quick lookup, or ask any question about your reading.\n\n/login — sign-in code for the web app\n/review — today's review words"
+        : "Welcome to <b>Immersive Reader</b>. Send /login to get a sign-in code for the web app."
     );
     return;
   }
 
   if (!user) {
-    await sendMessage(env, chatId, "Please connect your account first: open the app → Telegram → Connect.");
+    await sendMessage(env, chatId, "Send /login to get a sign-in code for the web app.");
     return;
   }
 

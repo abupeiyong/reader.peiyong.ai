@@ -27,7 +27,6 @@
   ],
   "vars": {
     "APP_ENV": "dev",
-    "GOOGLE_CLIENT_ID": "",
     "APP_ORIGIN": "http://localhost:5173"
   }
 }

@@ -37,14 +37,11 @@
   ],
   "vars": {
     "APP_ENV": "production",
-    // Google OAuth:部署时通过 secret 配置 GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET;
-    // 未配置时后端自动启用临时 dev 登录(输入邮箱直接登录)。
-    "GOOGLE_CLIENT_ID": "607995281562-ehieldaudb87b6bov2j07gfshigdaask.apps.googleusercontent.com",
     "APP_ORIGIN": "https://reader.peiyong.ai",
     // 查词/解析/对话优先用 gpt-5-nano(OpenAI 兼容网关);OPENAI_API_KEY 走 secret
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
     "OPENAI_CHAT_MODEL": "gpt-5-nano",
-    // Telegram Bot(token/webhook secret 走 wrangler secret)
+    // Telegram Bot:登录码 + 每日推送(token/webhook secret/owner chat id 走 wrangler secret)
     "TELEGRAM_BOT_USERNAME": "reader_peiyong_ai_bot",
     "APP_URL": "https://reader.peiyong.ai"
   },
