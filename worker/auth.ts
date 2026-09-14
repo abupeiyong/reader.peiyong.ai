@@ -1,15 +1,20 @@
+// 登录:Telegram 一次性随机码(个人站点唯一正式登录方式)。
+// 本地开发(APP_ENV != production)额外保留邮箱直登,便于 e2e。
 import { Hono, type Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Env, Vars } from "./env";
 import { uid, now } from "./util";
+import { telegramEnabled, sendMessage, getBotUsername } from "./telegram";
+import { issueLoginCode, verifyLoginCode, ownerChatId, chatAllowed, CODE_TTL } from "./logincode";
 
 const SESSION_TTL = 30 * 24 * 3600 * 1000; // 30 天
 const COOKIE = "sid";
+const TICKET_COOKIE = "lgt";
 
 export const authRoutes = new Hono<{ Bindings: Env; Variables: Vars }>();
 
-function googleEnabled(env: Env): boolean {
-  return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+function devLoginEnabled(env: Env): boolean {
+  return env.APP_ENV !== "production";
 }
 
 async function createSession(env: Env, userId: string): Promise<string> {
@@ -20,133 +25,104 @@ async function createSession(env: Env, userId: string): Promise<string> {
   return token;
 }
 
-async function upsertUser(
-  env: Env,
-  email: string,
-  name: string | null,
-  avatar: string | null,
-  googleSub: string | null
-): Promise<string> {
-  const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first<{ id: string }>();
-  if (existing) {
-    if (googleSub) {
-      await env.DB.prepare("UPDATE users SET google_sub = ?, name = COALESCE(?, name), avatar_url = COALESCE(?, avatar_url) WHERE id = ?")
-        .bind(googleSub, name, avatar, existing.id)
-        .run();
-    }
-    return existing.id;
-  }
-  const id = uid("u");
-  await env.DB.prepare(
-    "INSERT INTO users (id, email, name, avatar_url, google_sub, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-  )
-    .bind(id, email, name, avatar, googleSub, now())
-    .run();
-  return id;
-}
-
 function setSessionCookie(c: Context, token: string) {
   setCookie(c, COOKIE, token, {
     httpOnly: true,
     sameSite: "Lax",
+    secure: c.env.APP_ENV === "production",
     path: "/",
     maxAge: SESSION_TTL / 1000,
   });
 }
 
-// 前端用来决定展示 Google 登录还是临时 dev 登录
-authRoutes.get("/config", (c) => {
-  return c.json({ google: googleEnabled(c.env), devLogin: !googleEnabled(c.env) });
+/** chat → 账号:已绑定则复用(保留原有书库),否则新建一个 Telegram 账号 */
+async function userForChat(env: Env, chatId: string): Promise<string> {
+  const existing = await env.DB.prepare("SELECT id FROM users WHERE telegram_chat_id = ?")
+    .bind(chatId)
+    .first<{ id: string }>();
+  if (existing) return existing.id;
+  const id = uid("u");
+  await env.DB.prepare(
+    "INSERT INTO users (id, email, name, telegram_chat_id, tg_daily_enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)"
+  )
+    .bind(id, `tg${chatId}@telegram.local`, "Reader", chatId, now())
+    .run();
+  return id;
+}
+
+// 前端据此决定展示 Telegram 登录还是本地 dev 登录
+authRoutes.get("/config", async (c) => {
+  const telegram = telegramEnabled(c.env);
+  return c.json({
+    telegram,
+    devLogin: devLoginEnabled(c.env),
+    bot: telegram ? await getBotUsername(c.env) : null,
+  });
 });
 
-// 临时方案:未配置 Google OAuth 时,允许邮箱直接登录(仅本地/过渡用)
-authRoutes.post("/dev-login", async (c) => {
-  if (googleEnabled(c.env)) return c.json({ error: "dev login disabled" }, 403);
-  const body: { email?: string; name?: string } = await c.req.json().catch(() => ({}));
-  const email = (body.email || "").trim().toLowerCase();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return c.json({ error: "请输入有效邮箱" }, 400);
-  const userId = await upsertUser(c.env, email, body.name ?? email.split("@")[0], null, null);
-  const token = await createSession(c.env, userId);
-  setSessionCookie(c, token);
+// 发码:生成随机 6 位码,只发到站长的 Telegram
+authRoutes.post("/request-code", async (c) => {
+  if (!telegramEnabled(c.env)) return c.json({ error: "Telegram is not configured." }, 400);
+  const chatId = await ownerChatId(c.env);
+  if (!chatId) {
+    const bot = await getBotUsername(c.env);
+    return c.json(
+      { error: `No Telegram account linked yet. Send /login to ${bot ? "@" + bot : "the bot"} to get a code.` },
+      400
+    );
+  }
+  const ticket = uid("tk");
+  const issued = await issueLoginCode(c.env, chatId, ticket);
+  if ("error" in issued) return c.json({ error: issued.error }, 429);
+
+  setCookie(c, TICKET_COOKIE, ticket, {
+    httpOnly: true,
+    sameSite: "Lax",
+    secure: c.env.APP_ENV === "production",
+    path: "/",
+    maxAge: CODE_TTL / 1000,
+  });
+  await sendMessage(
+    c.env,
+    chatId,
+    `🔐 Sign-in code: <b>${issued.code}</b>\nValid for 5 minutes. If you didn't request it, ignore this message.`
+  );
+  return c.json({ ok: true, expires_in: CODE_TTL / 1000 });
+});
+
+// 验码:成功即建立会话
+authRoutes.post("/verify-code", async (c) => {
+  if (!telegramEnabled(c.env)) return c.json({ error: "Telegram is not configured." }, 400);
+  const body: { code?: string } = await c.req.json().catch(() => ({}));
+  const code = (body.code || "").replace(/\D/g, "");
+  if (code.length !== 6) return c.json({ error: "Enter the 6-digit code." }, 400);
+
+  const result = await verifyLoginCode(c.env, code, getCookie(c, TICKET_COOKIE) ?? null);
+  if ("error" in result) return c.json({ error: result.error }, 401);
+  if (!(await chatAllowed(c.env, result.chat_id))) return c.json({ error: "This account cannot sign in." }, 403);
+
+  deleteCookie(c, TICKET_COOKIE, { path: "/" });
+  const userId = await userForChat(c.env, result.chat_id);
+  setSessionCookie(c, await createSession(c.env, userId));
   return c.json({ ok: true });
 });
 
-// Google OAuth 跳转
-authRoutes.get("/google", (c) => {
-  if (!googleEnabled(c.env)) return c.text("Google OAuth 未配置", 400);
-  const redirectUri = `${c.env.APP_ORIGIN}/api/auth/google/callback`;
-  const state = uid("st");
-  setCookie(c, "oauth_state", state, { httpOnly: true, sameSite: "Lax", path: "/", maxAge: 600 });
-  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  url.searchParams.set("client_id", c.env.GOOGLE_CLIENT_ID);
-  url.searchParams.set("redirect_uri", redirectUri);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "openid email profile");
-  url.searchParams.set("state", state);
-  return c.redirect(url.toString());
-});
-
-function loginErrorPage(c: Context, title: string, detail: string): Response {
-  console.error("Google 登录失败:", title, detail);
-  return c.html(
-    `<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;padding:40px;max-width:640px;margin:auto">
-    <h2>Google 登录失败</h2><p><b>${title}</b></p>
-    <pre style="background:#f4f4f4;padding:12px;border-radius:8px;white-space:pre-wrap">${detail
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")}</pre>
-    <p><a href="/">← 返回重试</a></p></body>`,
-    400
-  );
-}
-
-authRoutes.get("/google/callback", async (c) => {
-  if (!googleEnabled(c.env)) return loginErrorPage(c, "Google OAuth 未配置", "");
-  const err = c.req.query("error");
-  if (err) return loginErrorPage(c, "Google 返回错误", err);
-  const code = c.req.query("code");
-  const state = c.req.query("state");
-  const cookieState = getCookie(c, "oauth_state");
-  if (!code || !state || state !== cookieState) {
-    return loginErrorPage(
-      c,
-      "state 校验失败",
-      `code=${Boolean(code)}, state=${state ?? "无"}, cookie_state=${cookieState ?? "无"}(浏览器可能拦截了 Cookie,请重试)`
-    );
+// 本地开发直登(生产禁用)
+authRoutes.post("/dev-login", async (c) => {
+  if (!devLoginEnabled(c.env)) return c.json({ error: "dev login disabled" }, 403);
+  const body: { email?: string; name?: string } = await c.req.json().catch(() => ({}));
+  const email = (body.email || "").trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return c.json({ error: "请输入有效邮箱" }, 400);
+  const existing = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first<{ id: string }>();
+  let userId = existing?.id;
+  if (!userId) {
+    userId = uid("u");
+    await c.env.DB.prepare("INSERT INTO users (id, email, name, created_at) VALUES (?, ?, ?, ?)")
+      .bind(userId, email, body.name ?? email.split("@")[0], now())
+      .run();
   }
-  deleteCookie(c, "oauth_state", { path: "/" });
-
-  const redirectUri = `${c.env.APP_ORIGIN}/api/auth/google/callback`;
-  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      client_id: c.env.GOOGLE_CLIENT_ID,
-      client_secret: c.env.GOOGLE_CLIENT_SECRET!,
-      redirect_uri: redirectUri,
-      grant_type: "authorization_code",
-    }),
-  });
-  const tokenBody = await tokenRes.text();
-  if (!tokenRes.ok) return loginErrorPage(c, `获取 Google token 失败 (${tokenRes.status})`, tokenBody.slice(0, 800));
-  let tokenJson: { access_token?: string };
-  try {
-    tokenJson = JSON.parse(tokenBody) as { access_token?: string };
-  } catch {
-    return loginErrorPage(c, "Google token 响应无法解析", tokenBody.slice(0, 800));
-  }
-  if (!tokenJson.access_token) return loginErrorPage(c, "Google token 无效", tokenBody.slice(0, 800));
-
-  const userRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-    headers: { Authorization: `Bearer ${tokenJson.access_token}` },
-  });
-  if (!userRes.ok) return loginErrorPage(c, `获取 Google 用户信息失败 (${userRes.status})`, (await userRes.text()).slice(0, 500));
-  const info = (await userRes.json()) as { sub: string; email: string; name?: string; picture?: string };
-
-  const userId = await upsertUser(c.env, info.email.toLowerCase(), info.name ?? null, info.picture ?? null, info.sub);
-  const token = await createSession(c.env, userId);
-  setSessionCookie(c, token);
-  return c.redirect("/");
+  setSessionCookie(c, await createSession(c.env, userId));
+  return c.json({ ok: true });
 });
 
 authRoutes.post("/logout", async (c) => {

@@ -6,7 +6,9 @@
 ## 功能
 
 **阅读**
-- Google 登录(未配置 OAuth 时降级邮箱临时登录);数据按用户私有
+- Telegram 一次性随机码登录(个人站点,无 Google/密码):网页点「Send code」→ Bot 收码 → 输入 6 位码;
+  也可直接给 Bot 发 `/login` 取码。码 5 分钟有效、一次性、网页发起的码绑定发起浏览器;
+  只有站长的 chat 能取码(`TELEGRAM_OWNER_CHAT_ID`,留空则取库中唯一已绑定账号)
 - PDF.js 阅读器:渲染、缩放、翻页、全文搜索、进度保存/恢复
 - 章节目录(PDF outline + 启发式兜底),点击快速跳转
 - 稳健文本层:点词/词旁间隙都能取词;`Util.transform` 正确坐标(处理 CropBox 偏移);
@@ -35,7 +37,7 @@
 - 报告:连续天数、收藏/掌握词数、估计词汇量、活动图
 
 **集成**
-- Telegram Bot @reader_peiyong_ai_bot:绑定账号、每日复习提醒 + 读书要点回顾(cron)、双向对话
+- Telegram Bot @reader_peiyong_ai_bot:登录取码(`/login`)、每日复习提醒 + 读书要点回顾(cron)、双向对话
 
 ## 技术栈
 React + TS + Vite · Cloudflare Workers + Hono · D1 · R2 · Vectorize ·
@@ -43,9 +45,10 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano · ElevenLabs TTS
 
 ## 开发 / 部署
 - 本地:`npm run dev`(用 `wrangler.dev.jsonc`,无 AI 绑定 → 离线 mock)
-- 部署:`npm run deploy`;迁移 0001–0005(`npm run db:migrate:remote`)
-- Secret:`GOOGLE_CLIENT_SECRET`、`OPENAI_API_KEY`、`ELEVENLABS_API_KEY`、
-  `TELEGRAM_BOT_TOKEN`、`TELEGRAM_WEBHOOK_SECRET`
+- 部署:`npm run deploy`;迁移 0001–0010(`npm run db:migrate:remote`)
+- Secret:`OPENAI_API_KEY`、`ELEVENLABS_API_KEY`、`TELEGRAM_BOT_TOKEN`、
+  `TELEGRAM_WEBHOOK_SECRET`、`TELEGRAM_OWNER_CHAT_ID`(可选,限定唯一可登录的 chat)
+- 本地开发(`APP_ENV != production`)保留邮箱直登,供 e2e 用;生产环境自动禁用
 - Vectorize 索引 `reader-vec`(1024 维,cosine),部署前创建一次
 - Cron `0 * * * *` 驱动 Telegram 每日推送
 - `OPENAI_BASE_URL` 可在 OpenAI 直连与兼容网关间切换
@@ -53,9 +56,9 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano · ElevenLabs TTS
 
 ## 目录结构
 ```
-worker/    Hono API + ai.ts / openai.ts / elevenlabs.ts / telegram.ts / vocabmodel.ts / wordfreq.ts
+worker/    Hono API + auth.ts / logincode.ts / ai.ts / openai.ts / elevenlabs.ts / telegram.ts / vocabmodel.ts
 src/       React 前端(pages/ 页面,components/ 组件,lib/ PDF·TTS·录音·TOC)
 shared/    前后端共享类型
-migrations/ D1 迁移(0001 MVP … 0005 阅读计时)
+migrations/ D1 迁移(0001 MVP … 0010 登录码)
 scripts/   Playwright 端到端自测(scripts/e2e.mjs)
 ```

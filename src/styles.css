@@ -111,8 +111,18 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .login-logo { color: var(--primary); line-height: 0; }
 .login-card h1 { margin: 10px 0 4px; font-size: 27px; font-family: var(--serif); font-weight: 600; }
 .login-sub { color: var(--muted); margin: 0 0 28px; }
-.btn-google { width: 100%; justify-content: center; padding: 11px; font-size: 15px; border-radius: 12px; }
-.dev-login { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.btn-block { width: 100%; justify-content: center; padding: 11px; font-size: 15px; border-radius: 12px; }
+.tg-login { display: flex; flex-direction: column; gap: 10px; }
+.tg-login-desc { margin: 0 0 2px; font-size: 14px; color: var(--muted); }
+.tg-login-hint { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.tg-login-hint code { background: #efeadd; border-radius: 5px; padding: 1px 5px; font-size: 12px; }
+.code-input {
+  padding: 12px; border: 1px solid var(--border); border-radius: 12px; width: 100%; background: #fff;
+  font-family: var(--serif); font-size: 26px; letter-spacing: 9px; text-align: center;
+}
+.code-input::placeholder { color: #c9c1ae; letter-spacing: 9px; }
+.dev-login { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 10px; }
 .dev-login-note { font-size: 12px; color: var(--muted); background: #efeadd; border-radius: 8px; padding: 8px; }
 .dev-login input {
   padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; width: 100%; background: #fff;
@@ -669,7 +679,6 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .tg-row span { color: var(--text); }
 .tg-row select { margin-left: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; background: #fff; }
 .tg-row input[type="checkbox"] { accent-color: var(--primary); width: 16px; height: 16px; }
-.tg-unlink { margin-top: 8px; }
 
 /* 窄屏 */
 @media (max-width: 1000px) {
