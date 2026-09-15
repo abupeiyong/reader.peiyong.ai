@@ -90,6 +90,27 @@ export function speakSentences(sentences: string[], opts: TtsOptions): TtsContro
   let idx = opts.startIndex ?? 0;
   let audio: HTMLAudioElement | null = null;
   let mode: "pending" | "cloud" | "browser" = "pending";
+  let current: "cloud" | "browser" = "cloud"; // 当前这句实际用的通道(暂停/继续要分开处理)
+
+  // 浏览器合成单句(云端整体不可用、或云端这一句取不到音频时用)
+  const speakOneBrowser = (cur: number, done: () => void) => {
+    void pickVoice(opts.accent).then((voice) => {
+      if (stopped) return;
+      const u = new SpeechSynthesisUtterance(sentences[cur]);
+      if (voice) u.voice = voice;
+      u.lang = opts.accent === "US" ? "en-US" : "en-GB";
+      u.rate = opts.rate;
+      current = "browser";
+      opts.onSentence?.(cur);
+      u.onend = () => {
+        if (!stopped) done();
+      };
+      u.onerror = () => {
+        if (!stopped) done();
+      };
+      speechSynthesis.speak(u);
+    });
+  };
 
   const playCloud = async () => {
     if (stopped) return;
@@ -106,11 +127,16 @@ export function speakSentences(sentences: string[], opts: TtsOptions): TtsContro
         speakBrowser();
         return;
       }
-      idx = cur + 1;
-      void playCloud();
+      // 云端偶发取不到这一句(限流/网络):用浏览器合成读完它,下一句继续走云端。
+      // 直接跳过的话这句既不出声也不高亮。
+      speakOneBrowser(cur, () => {
+        idx = cur + 1;
+        void playCloud();
+      });
       return;
     }
     mode = "cloud";
+    current = "cloud";
     opts.onSentence?.(cur);
     if (cur + 1 < sentences.length) void fetchTtsUrl(sentences[cur + 1], opts.accent); // 预取
     audio = new Audio(url);
@@ -132,31 +158,16 @@ export function speakSentences(sentences: string[], opts: TtsOptions): TtsContro
     }
   };
 
-  // 浏览器逐句合成(回退)
+  // 浏览器逐句合成(云端整体不可用时的回退)
   const speakBrowser = () => {
     if (stopped || idx >= sentences.length) {
       if (!stopped) opts.onEnd?.();
       return;
     }
-    void pickVoice(opts.accent).then((voice) => {
-      if (stopped) return;
-      const cur = idx;
-      const u = new SpeechSynthesisUtterance(sentences[cur]);
-      if (voice) u.voice = voice;
-      u.lang = opts.accent === "US" ? "en-US" : "en-GB";
-      u.rate = opts.rate;
-      opts.onSentence?.(cur);
-      u.onend = () => {
-        if (stopped) return;
-        idx = cur + 1;
-        speakBrowser();
-      };
-      u.onerror = () => {
-        if (stopped) return;
-        idx = cur + 1;
-        speakBrowser();
-      };
-      speechSynthesis.speak(u);
+    const cur = idx;
+    speakOneBrowser(cur, () => {
+      idx = cur + 1;
+      speakBrowser();
     });
   };
 
@@ -172,12 +183,12 @@ export function speakSentences(sentences: string[], opts: TtsOptions): TtsContro
     },
     pause() {
       paused = true;
-      if (mode === "cloud") audio?.pause();
+      if (current === "cloud") audio?.pause();
       else speechSynthesis.pause();
     },
     resume() {
       paused = false;
-      if (mode === "cloud") void audio?.play();
+      if (current === "cloud") void audio?.play();
       else speechSynthesis.resume();
     },
     get paused() {

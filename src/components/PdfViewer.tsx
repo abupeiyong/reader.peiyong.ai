@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { pdfjs, type PDFDocumentProxy } from "../lib/pdf";
-import type { Paragraph } from "../lib/pdfText";
+import { matchSentence, type Paragraph } from "../lib/pdfText";
 import { Icon } from "./Icon";
 
 export interface WordClickInfo {
@@ -47,6 +47,7 @@ export default function PdfViewer({
   const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
   const [flash, setFlash] = useState(false);
   const [damaged, setDamaged] = useState(false);
+  const [layerVersion, setLayerVersion] = useState(0);
 
   // 渲染页面 canvas + 文本层
   useEffect(() => {
@@ -92,6 +93,7 @@ export default function PdfViewer({
       await tl.render();
       if (cancelled) return;
       wrapWords(textLayer);
+      setLayerVersion((v) => v + 1); // 文本层重建后需要重新贴高亮
       // 检测文本层坐标是否损坏(字体宽度表异常导致大量词飘到页面外)
       const dmg = detectDamage(textLayer, viewport.width);
       textLayer.classList.toggle("damaged", dmg);
@@ -110,7 +112,7 @@ export default function PdfViewer({
     if (textLayerRef.current) applyHints(textLayerRef.current, hintWords, showHints && !damaged);
   }, [hintWords, showHints, damaged]);
 
-  // TTS 句子高亮
+  // TTS 句子高亮(文本层重建后也重贴,避免翻页/缩放时高亮丢失)
   useEffect(() => {
     const layer = textLayerRef.current;
     if (!layer) return;
@@ -120,7 +122,7 @@ export default function PdfViewer({
     const sentence = para?.sentences[ttsHighlight.sentIndex];
     if (!sentence) return;
     highlightSentence(layer, sentence);
-  }, [ttsHighlight, paragraphs]);
+  }, [ttsHighlight, paragraphs, layerVersion]);
 
   // 引用跳转闪烁
   useEffect(() => {
@@ -295,31 +297,12 @@ function escapeReg(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** 在文本层中按 token 序列匹配并高亮一句话 */
+/** 在文本层中定位并高亮一句话;匹配规则见 matchSentence */
 function highlightSentence(layer: HTMLElement, sentence: string) {
-  const tokens = (sentence.toLowerCase().match(/[a-z'-]+/g) ?? []).filter(Boolean);
-  if (tokens.length === 0) return;
   const spans = [...layer.querySelectorAll<HTMLElement>(".w")];
-  const words = spans.map((el) => normWord(el.textContent ?? ""));
-  // 滑动窗口找 token 序列起点(允许中间夹杂少量不匹配)
-  for (let start = 0; start < words.length; start++) {
-    if (words[start] !== tokens[0]) continue;
-    let ti = 0;
-    let misses = 0;
-    let end = start;
-    for (let i = start; i < words.length && ti < tokens.length; i++) {
-      if (words[i] === tokens[ti]) {
-        ti++;
-        end = i;
-      } else {
-        misses++;
-        if (misses > 3) break;
-      }
-    }
-    if (ti >= Math.min(tokens.length, Math.max(2, tokens.length * 0.7))) {
-      for (let i = start; i <= end; i++) spans[i].classList.add("tts-active");
-      spans[start].scrollIntoView({ block: "nearest", behavior: "smooth" });
-      return;
-    }
-  }
+  if (spans.length === 0) return;
+  const hit = matchSentence(spans.map((el) => el.textContent ?? ""), sentence);
+  if (!hit) return;
+  for (let i = hit.start; i <= hit.end; i++) spans[i].classList.add("tts-active");
+  spans[hit.start].scrollIntoView({ block: "nearest", behavior: "smooth" });
 }

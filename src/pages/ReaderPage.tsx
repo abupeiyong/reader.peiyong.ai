@@ -531,12 +531,10 @@ export default function ReaderPage({
       {showTtsBar && (
         <ReadAloudBar
           paragraphs={paragraphs}
-          bookId={bookId}
           pageNo={pageNo}
           command={ttsCommand}
           onHighlight={setTtsHighlight}
           onClose={() => { setShowTtsBar(false); setTtsHighlight(null); }}
-          onRecordingSaved={() => setVocabNonce((n) => n + 1)}
         />
       )}
 

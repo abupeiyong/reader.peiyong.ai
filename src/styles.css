@@ -85,7 +85,6 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 }
 .chip.active { background: var(--primary); border-color: var(--primary); color: #fbf9f3; }
 .chip:disabled { opacity: 0.45; cursor: default; }
-.chip.miss { color: var(--danger); border-color: #e6c3b6; background: #f7ece7; margin: 2px; cursor: default; }
 
 .error-text { color: var(--danger); font-size: 13px; margin: 8px 0; }
 .hint-text { color: var(--muted); font-size: 13px; }
@@ -426,7 +425,6 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 
 /* ---------- 学习记录 ---------- */
 
-.vocab-switch { display: flex; gap: 8px; margin-bottom: 10px; }
 .vocab-filters { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
 .review-entry { margin-bottom: 12px; }
 .vocab-day { margin-bottom: 14px; }
@@ -448,16 +446,6 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .status-dot.review { background: var(--danger); }
 .vocab-detail { padding: 0 2px 10px; display: flex; flex-direction: column; gap: 6px; }
 .vocab-actions { display: flex; gap: 8px; }
-
-.rec-item { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; background: #fff; }
-.rec-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.rec-ref { font-size: 12.5px; font-style: italic; color: #55503f; margin: 6px 0; }
-.rec-audio { width: 100%; height: 32px; margin-top: 6px; }
-.coverage { font-weight: 700; font-size: 13px; }
-.coverage.big { font-size: 16px; }
-.coverage.good { color: var(--good); }
-.coverage.ok { color: #b98b00; }
-.coverage.bad { color: var(--danger); }
 
 /* ---------- 朗读栏 ---------- */
 
@@ -497,17 +485,6 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .tts-progress-count {
   font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
 }
-.record-ref { color: #4a4238; }
-.rec-dot { color: var(--danger); font-size: 13px; animation: blink 1.2s step-end infinite; }
-
-.feedback-panel {
-  margin-top: 8px; border-top: 1px solid #efe9d9; padding-top: 8px;
-  display: flex; flex-direction: column; gap: 7px; font-size: 13px;
-}
-.feedback-row { display: flex; align-items: center; gap: 12px; }
-.feedback-row .icon-btn { margin-left: auto; }
-.feedback-words { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }
-.feedback-suggest { background: #f1ecdd; border-radius: 8px; padding: 8px 10px; color: #4a4238; }
 
 /* ---------- 复习闪卡 ---------- */
 

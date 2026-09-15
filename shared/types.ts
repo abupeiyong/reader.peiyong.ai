@@ -62,28 +62,6 @@ export interface ChatMessage {
   created_at: number;
 }
 
-export interface RecordingFeedback {
-  transcript: string;
-  coverage: number;           // 0-100 完整度
-  missed_words: string[];     // 漏读
-  extra_words: string[];      // 多读
-  matched_count: number;
-  ref_word_count: number;
-  suggestions: string;        // 建议(中文)
-  wpm?: number | null;        // 语速(词/分钟)
-  source?: "ai" | "browser";
-}
-
-export interface RecordingItem {
-  id: string;
-  book_id: string | null;
-  page_no: number | null;
-  ref_text: string;
-  transcript: string | null;
-  feedback_json: string | null;
-  created_at: number;
-}
-
 export type ChatScope = "selection" | "page" | "document";
 
 // ---------- 二期 ----------
@@ -99,7 +77,6 @@ export interface DayStat {
   lookup?: number;
   vocab_add?: number;
   review?: number;
-  recording?: number;
   chat?: number;
 }
 
@@ -138,7 +115,6 @@ export interface Stats {
   vocab: Record<string, number>;
   due_count: number;
   book_count: number;
-  recording_count: number;
   vocab_rank: number;
   vocab_trend: VocabSnapshot[];
 }

@@ -2,9 +2,8 @@ import { Hono } from "hono";
 import type { Env, Vars } from "./env";
 import { authRoutes, requireAuth } from "./auth";
 import { uid, now, tokenizeWords, fnv1aHex, sha256Hex } from "./util";
-import { explainWord, analyzePage, chatStream, transcribeAudio, embedTexts, ttsAudio, ocrImage, readingAdvice } from "./ai";
+import { explainWord, analyzePage, chatStream, transcribeAudio, embedTexts, ttsAudio, ocrImage } from "./ai";
 import { elevenTts } from "./elevenlabs";
-import { computeFeedback } from "./feedback";
 import { estimateVocabRank, hintsForText, applyReview, priorRank, type ReviewGrade } from "./vocabmodel";
 import { wordRank } from "./wordfreq";
 import { telegramEnabled, handleUpdate, runDailyPush } from "./telegram";
@@ -500,9 +499,6 @@ api.get("/stats", async (c) => {
   const bookCount = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM books WHERE user_id = ?")
     .bind(userId)
     .first<{ n: number }>();
-  const recCount = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM recordings WHERE user_id = ?")
-    .bind(userId)
-    .first<{ n: number }>();
   const user = await c.env.DB.prepare("SELECT english_level, vocab_rank FROM users WHERE id = ?")
     .bind(userId)
     .first<{ english_level: string; vocab_rank: number | null }>();
@@ -525,7 +521,6 @@ api.get("/stats", async (c) => {
     vocab: Object.fromEntries(vocabCounts.results.map((r) => [r.status, r.n])),
     due_count: dueCount?.n ?? 0,
     book_count: bookCount?.n ?? 0,
-    recording_count: recCount?.n ?? 0,
     vocab_rank: vocabRank,
     vocab_trend: trend,
   });
@@ -950,87 +945,6 @@ ${contextParts.join("\n\n") || "(本页暂无文本)"}`;
       Connection: "keep-alive",
     },
   });
-});
-
-// ---------- 录音与朗读反馈 ----------
-
-api.post("/recordings", async (c) => {
-  const userId = c.get("userId");
-  const form = await c.req.formData();
-  const audio = form.get("audio");
-  const refText = String(form.get("ref_text") ?? "");
-  const browserTranscript = String(form.get("browser_transcript") ?? "");
-  const bookId = form.get("book_id") ? String(form.get("book_id")) : null;
-  const pageNo = form.get("page_no") ? Number(form.get("page_no")) : null;
-  if (!(audio instanceof File) || !refText.trim()) return c.json({ error: "缺少录音或参考文本" }, 400);
-  if (audio.size > 15 * 1024 * 1024) return c.json({ error: "录音过大" }, 400);
-
-  const id = uid("rec");
-  const key = `recordings/${userId}/${id}.webm`;
-  const bytes = await audio.arrayBuffer();
-  await c.env.BUCKET.put(key, bytes, { httpMetadata: { contentType: audio.type || "audio/webm" } });
-
-  // 优先 Whisper;不可用时回退浏览器语音识别的转写(临时方案)
-  let transcript = await transcribeAudio(c.env, bytes);
-  let source: "ai" | "browser" = "ai";
-  if (!transcript) {
-    transcript = browserTranscript;
-    source = "browser";
-  }
-  const feedback = { ...computeFeedback(refText, transcript ?? ""), source } as ReturnType<typeof computeFeedback> & {
-    source: "ai" | "browser";
-    wpm?: number | null;
-  };
-  // 语速(词/分钟)
-  const durationMs = form.get("duration_ms") ? Number(form.get("duration_ms")) : null;
-  feedback.wpm =
-    durationMs && durationMs > 500 && transcript
-      ? Math.round((transcript.trim().split(/\s+/).length / durationMs) * 60000)
-      : null;
-  // AI 针对性建议(不可用时保留规则建议)
-  const advice = await readingAdvice(c.env, refText, transcript ?? "", feedback.missed_words, feedback.wpm ?? null);
-  if (advice) feedback.suggestions = advice;
-  void logActivity(c.env, userId, "recording", bookId, pageNo);
-
-  await c.env.DB.prepare(
-    "INSERT INTO recordings (id, user_id, book_id, page_no, r2_key, ref_text, transcript, feedback_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  )
-    .bind(id, userId, bookId, pageNo, key, refText, transcript ?? "", JSON.stringify(feedback), now())
-    .run();
-
-  return c.json({ id, feedback });
-});
-
-api.get("/recordings", async (c) => {
-  const { results } = await c.env.DB.prepare(
-    "SELECT id, book_id, page_no, ref_text, transcript, feedback_json, created_at FROM recordings WHERE user_id = ? ORDER BY created_at DESC LIMIT 50"
-  )
-    .bind(c.get("userId"))
-    .all();
-  return c.json(results);
-});
-
-api.get("/recordings/:id/audio", async (c) => {
-  const row = await c.env.DB.prepare("SELECT r2_key FROM recordings WHERE id = ? AND user_id = ?")
-    .bind(c.req.param("id"), c.get("userId"))
-    .first<{ r2_key: string }>();
-  if (!row) return c.json({ error: "not found" }, 404);
-  const obj = await c.env.BUCKET.get(row.r2_key);
-  if (!obj) return c.json({ error: "file missing" }, 404);
-  return new Response(obj.body, { headers: { "Content-Type": "audio/webm" } });
-});
-
-api.delete("/recordings/:id", async (c) => {
-  const row = await c.env.DB.prepare("SELECT r2_key FROM recordings WHERE id = ? AND user_id = ?")
-    .bind(c.req.param("id"), c.get("userId"))
-    .first<{ r2_key: string }>();
-  if (row) {
-    await c.env.BUCKET.delete(row.r2_key);
-    await c.env.DB.prepare("DELETE FROM recordings WHERE id = ? AND user_id = ?")
-      .bind(c.req.param("id"), c.get("userId"))
-      .run();
-  }
-  return c.json({ ok: true });
 });
 
 // ---------- Telegram 每日推送设置(需登录) ----------
