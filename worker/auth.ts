@@ -8,6 +8,7 @@ import { telegramEnabled, sendMessage, getBotUsername } from "./telegram";
 import { issueLoginCode, verifyLoginCode, ownerChatId, chatAllowed, CODE_TTL } from "./logincode";
 
 const SESSION_TTL = 30 * 24 * 3600 * 1000; // 30 天
+const RENEW_AFTER = SESSION_TTL / 2;       // 剩余不足一半时滑动续期
 const COOKIE = "sid";
 const TICKET_COOKIE = "lgt";
 
@@ -33,6 +34,13 @@ function setSessionCookie(c: Context, token: string) {
     path: "/",
     maxAge: SESSION_TTL / 1000,
   });
+}
+
+/** 与 setSessionCookie 等价的原始 Set-Cookie 串:给已生成的响应补 cookie 用 */
+function sessionCookieHeader(c: Context, token: string): string {
+  const parts = [`${COOKIE}=${token}`, `Max-Age=${SESSION_TTL / 1000}`, "Path=/", "HttpOnly", "SameSite=Lax"];
+  if (c.env.APP_ENV === "production") parts.push("Secure");
+  return parts.join("; ");
 }
 
 /** chat → 账号:已绑定则复用(保留原有书库),否则新建一个 Telegram 账号 */
@@ -134,7 +142,7 @@ authRoutes.post("/logout", async (c) => {
   return c.json({ ok: true });
 });
 
-/** 认证中间件:解析 cookie → userId,未登录返回 401 */
+/** 认证中间件:解析 cookie → userId,未登录返回 401;活跃会话滑动续期 */
 import { createMiddleware } from "hono/factory";
 
 export const requireAuth = createMiddleware<{ Bindings: Env; Variables: Vars }>(async (c, next) => {
@@ -146,4 +154,21 @@ export const requireAuth = createMiddleware<{ Bindings: Env; Variables: Vars }>(
   if (!row || row.expires_at < now()) return c.json({ error: "unauthorized" }, 401);
   c.set("userId", row.user_id);
   await next();
+
+  // 剩余不足一半时往后顺延 30 天。先补 Set-Cookie 再写库:
+  // 少数路由返回的响应头不可写(流式/文件),那种情况下这次不续,下次请求再续,
+  // 避免出现「库里续了、浏览器 cookie 没续」而被提前登出。
+  if (row.expires_at - now() >= RENEW_AFTER) return;
+  try {
+    c.res.headers.append("Set-Cookie", sessionCookieHeader(c, token));
+  } catch {
+    return;
+  }
+  c.executionCtx.waitUntil(
+    c.env.DB.prepare("UPDATE sessions SET expires_at = ? WHERE token = ?")
+      .bind(now() + SESSION_TTL, token)
+      .run()
+      .then(() => undefined)
+      .catch((e: Error) => console.warn("会话续期失败:", e.message))
+  );
 });
