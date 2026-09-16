@@ -48,6 +48,10 @@ export default function ReadAloudBar({ paragraphs, pageNo, command, onHighlight,
         setSentIndex(i);
         onHighlight({ paraIndex: pIdx, sentIndex: i });
       },
+      onBlocked: () => {
+        // 浏览器拒绝了自动播放:显示成暂停,用户点一下(带手势)就能继续
+        setMode("paused");
+      },
       onEnd: () => {
         // 整页模式:继续下一段
         const next = findNextReadable(paragraphs, pIdx);
@@ -78,7 +82,13 @@ export default function ReadAloudBar({ paragraphs, pageNo, command, onHighlight,
       ttsRef.current?.stop();
     };
   }, []);
+  // 翻页时停止。注意只在 pageNo 真的变了时才停:
+  // 挂载时这个 effect 也会跑一次,而此时上面的 command effect 已经起了播放,
+  // 无条件 stopAll 会把它掐掉 —— 表现就是「朗读栏没开着时,第一次点播放没反应」。
+  const lastPageRef = useRef(pageNo);
   useEffect(() => {
+    if (lastPageRef.current === pageNo) return;
+    lastPageRef.current = pageNo;
     stopAll();
     setMode("idle");
     // eslint-disable-next-line react-hooks/exhaustive-deps
