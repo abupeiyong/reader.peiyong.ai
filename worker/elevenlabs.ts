@@ -12,6 +12,17 @@ export function elevenEnabled(env: Env): boolean {
   return Boolean(env.ELEVENLABS_API_KEY);
 }
 
+/**
+ * 缓存分桶后缀:用默认音色时返回空串(沿用历史 key,已有缓存不失效);
+ * 显式配置了音色/模型时带上指纹,换音色后不会再拿到旧音色的音频。
+ */
+export function voiceTag(env: Env, accent: "US" | "GB"): string {
+  const custom = accent === "GB" ? env.ELEVENLABS_VOICE_UK : env.ELEVENLABS_VOICE_US;
+  if (!custom && !env.ELEVENLABS_MODEL_ID) return "";
+  const voice = custom || (accent === "GB" ? DEFAULT_VOICE_UK : DEFAULT_VOICE_US);
+  return `-${voice.slice(0, 8)}-${(env.ELEVENLABS_MODEL_ID || DEFAULT_MODEL).replace(/[^a-zA-Z0-9_]/g, "")}`;
+}
+
 export async function elevenTts(env: Env, text: string, accent: "US" | "GB"): Promise<Uint8Array | null> {
   if (!env.ELEVENLABS_API_KEY) return null;
   const voice =
