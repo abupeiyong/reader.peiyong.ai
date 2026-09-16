@@ -278,24 +278,6 @@ export async function ocrImage(env: Env, image: ArrayBuffer): Promise<string | n
   return null;
 }
 
-// ---------- 朗读建议(LLM 针对性反馈) ----------
-
-export async function readingAdvice(
-  env: Env,
-  refText: string,
-  transcript: string,
-  missed: string[],
-  wpm: number | null
-): Promise<string | null> {
-  const prompt = `用户在跟读英文段落。请给出 2-3 句中文的针对性练习建议(具体到单词发音要点,如元音/重音/连读),不要客套话。
-原文:"${refText.slice(0, 400)}"
-识别到的朗读:"${transcript.slice(0, 400)}"
-未识别到的词:${missed.slice(0, 10).join(", ") || "无"}
-语速:${wpm ? `${wpm} 词/分钟` : "未知"}(英语朗读常速约 120-160)`;
-  const text = await runLLM(env, [{ role: "user", content: prompt }], 300);
-  return text?.trim() || null;
-}
-
 // ---------- 语音转写 ----------
 
 export async function transcribeAudio(env: Env, audio: ArrayBuffer): Promise<string | null> {

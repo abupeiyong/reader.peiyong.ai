@@ -3,7 +3,7 @@ import { api } from "../api";
 import type { DayStat, Stats, VocabSnapshot } from "../../shared/types";
 
 function dayTotal(d: DayStat): number {
-  return (d.page_view ?? 0) + (d.lookup ?? 0) + (d.vocab_add ?? 0) + (d.review ?? 0) + (d.recording ?? 0) + (d.chat ?? 0);
+  return (d.page_view ?? 0) + (d.lookup ?? 0) + (d.vocab_add ?? 0) + (d.review ?? 0) + (d.chat ?? 0);
 }
 
 export default function StatsPanel({ refreshNonce }: { refreshNonce: number }) {
@@ -47,10 +47,6 @@ export default function StatsPanel({ refreshNonce }: { refreshNonce: number }) {
           <div className="stat-num">≈{formatRank(stats.vocab_rank)}</div>
           <div className="stat-label">Est. vocabulary</div>
         </div>
-        <div className="stat-tile">
-          <div className="stat-num">{stats.recording_count}</div>
-          <div className="stat-label">Speaking drills</div>
-        </div>
       </div>
 
       <div className="chart-block">
@@ -73,7 +69,6 @@ export default function StatsPanel({ refreshNonce }: { refreshNonce: number }) {
                         d.page_view ? `Read ${d.page_view}` : "",
                         d.lookup ? `Lookups ${d.lookup}` : "",
                         d.review ? `Review ${d.review}` : "",
-                        d.recording ? `Speaking ${d.recording}` : "",
                         d.chat ? `Chat ${d.chat}` : "",
                       ]
                         .filter(Boolean)

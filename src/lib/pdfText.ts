@@ -25,6 +25,76 @@ interface Line {
   text: string;
 }
 
+/** 词形归一:只留字母,让 don't/dont、co-operate/cooperate 等价 */
+function wordKey(w: string): string {
+  return w.toLowerCase().replace(/[^a-z]/g, "");
+}
+
+/**
+ * 在文本层的词序列里定位一句话,返回闭区间下标 [start, end]。
+ * 文本层的词和段落文本对不上是常态,所以做模糊匹配,容忍:
+ * - 行末连字符拆词:文本层是 "co-" + "operate",段落文本已合并成 "cooperate"
+ * - 句中插入页眉页脚/脚注号等文本层才有的词
+ * - 个别词在文本层里取不到(取词失败、特殊字形)
+ */
+export function matchSentence(spanWords: string[], sentence: string): { start: number; end: number } | null {
+  const tokens = (sentence.toLowerCase().match(/[a-z][a-z'-]*/g) ?? []).map(wordKey).filter(Boolean);
+  if (tokens.length === 0) return null;
+  const keys = spanWords.map(wordKey);
+  const need = Math.min(2, tokens.length);
+  const budget = Math.max(3, Math.round(tokens.length * 0.35)); // 允许跳过的多余词数
+  const leadCount = Math.min(3, tokens.length);                 // 句首前几个词都可以作为锚点
+
+  /** span i 是否匹配 token ti;返回消耗的 span 数(0 = 不匹配) */
+  const eq = (i: number, ti: number): number => {
+    if (!keys[i]) return 0;
+    if (keys[i] === tokens[ti]) return 1;
+    if (i + 1 < keys.length && keys[i] + keys[i + 1] === tokens[ti]) return 2;
+    return 0;
+  };
+
+  let best: { start: number; end: number; matched: number } | null = null;
+  for (let start = 0; start < keys.length; start++) {
+    let ti0 = -1;
+    for (let k = 0; k < leadCount; k++) {
+      if (eq(start, k)) {
+        ti0 = k;
+        break;
+      }
+    }
+    if (ti0 === -1) continue;
+
+    let i = start;
+    let ti = ti0;
+    let end = start;
+    let matched = 0;
+    let misses = 0;
+    const limit = Math.min(keys.length, start + tokens.length * 3 + 12);
+    while (i < limit && ti < tokens.length) {
+      const consumed = eq(i, ti);
+      if (consumed) {
+        matched++;
+        end = i + consumed - 1;
+        i += consumed;
+        ti++;
+        continue;
+      }
+      if (ti + 1 < tokens.length && eq(i, ti + 1)) {
+        ti++; // 这个词文本层里没有,跳过它
+        continue;
+      }
+      i++;
+      misses++;
+      if (misses > budget) break;
+    }
+    if (matched >= need && matched / tokens.length >= 0.5 && (!best || matched > best.matched)) {
+      best = { start, end, matched };
+      if (matched === tokens.length) break;
+    }
+  }
+  return best ? { start: best.start, end: best.end } : null;
+}
+
 export function splitSentences(text: string): string[] {
   return text
     .replace(/\s+/g, " ")
