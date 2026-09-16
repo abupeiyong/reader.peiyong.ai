@@ -3,7 +3,7 @@ import type { Env, Vars } from "./env";
 import { authRoutes, requireAuth } from "./auth";
 import { uid, now, tokenizeWords, fnv1aHex, sha256Hex } from "./util";
 import { explainWord, analyzePage, chatStream, transcribeAudio, embedTexts, ttsAudio, ocrImage } from "./ai";
-import { elevenTts } from "./elevenlabs";
+import { elevenTts, voiceTag } from "./elevenlabs";
 import { estimateVocabRank, hintsForText, applyReview, priorRank, type ReviewGrade } from "./vocabmodel";
 import { wordRank } from "./wordfreq";
 import { telegramEnabled, handleUpdate, runDailyPush } from "./telegram";
@@ -535,7 +535,7 @@ api.get("/tts", async (c) => {
   const headers = { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" };
 
   // R2 持久缓存:同一 (口音, 文本) 的音频全局复用,省 ElevenLabs 配额且 ~50ms 返回
-  const key = `tts/${accent}/${await sha256Hex(text.trim().replace(/\s+/g, " ").toLowerCase())}.mp3`;
+  const key = `tts/${accent}${voiceTag(c.env, accent)}/${await sha256Hex(text.trim().replace(/\s+/g, " ").toLowerCase())}.mp3`;
   const cached = await c.env.BUCKET.get(key);
   if (cached) return new Response(cached.body, { headers });
 

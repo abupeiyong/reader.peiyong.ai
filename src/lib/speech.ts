@@ -6,27 +6,49 @@ export type Accent = "US" | "GB";
 // ---------- 云端音频(ElevenLabs)----------
 
 const audioCache = new Map<string, string>(); // `${accent}:${text}` -> objectURL
+const inflight = new Map<string, Promise<string | null>>(); // 同一句同时被预取和播放时只发一次请求
+const MAX_CACHED = 300;                                     // 超出后按插入顺序淘汰,释放 objectURL
 let cloudTtsAvailable = true;
+
+function rememberAudio(key: string, url: string) {
+  audioCache.set(key, url);
+  while (audioCache.size > MAX_CACHED) {
+    const oldest = audioCache.keys().next();
+    if (oldest.done) break;
+    const stale = audioCache.get(oldest.value);
+    if (stale) URL.revokeObjectURL(stale);
+    audioCache.delete(oldest.value);
+  }
+}
 
 async function fetchTtsUrl(text: string, accent: Accent): Promise<string | null> {
   if (!cloudTtsAvailable || !text.trim()) return null;
   const key = `${accent}:${text}`;
   const cached = audioCache.get(key);
   if (cached) return cached;
-  try {
-    const res = await fetch(`/api/tts?accent=${accent}&text=${encodeURIComponent(text.slice(0, 800))}`);
-    if (!res.ok) {
-      if (res.status === 503) cloudTtsAvailable = false; // 服务端无任何 TTS provider
+  const pending = inflight.get(key);
+  if (pending) return pending; // 预取还没回来就播到了这句:复用同一个请求,别再打一次 ElevenLabs
+
+  const task = (async () => {
+    try {
+      const res = await fetch(`/api/tts?accent=${accent}&text=${encodeURIComponent(text.slice(0, 800))}`);
+      if (!res.ok) {
+        if (res.status === 503) cloudTtsAvailable = false; // 服务端无任何 TTS provider
+        return null;
+      }
+      const blob = await res.blob();
+      if (blob.size < 100) return null;
+      const url = URL.createObjectURL(blob);
+      rememberAudio(key, url);
+      return url;
+    } catch {
       return null;
+    } finally {
+      inflight.delete(key);
     }
-    const blob = await res.blob();
-    if (blob.size < 100) return null;
-    const url = URL.createObjectURL(blob);
-    audioCache.set(key, url);
-    return url;
-  } catch {
-    return null;
-  }
+  })();
+  inflight.set(key, task);
+  return task;
 }
 
 function clampRate(r: number): number {
