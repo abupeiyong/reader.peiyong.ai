@@ -103,6 +103,8 @@ export interface TtsOptions {
   startIndex?: number;
   onSentence?: (index: number) => void;
   onEnd?: () => void;
+  /** 浏览器拦截了自动播放(需要用户手势)时回调 */
+  onBlocked?: () => void;
 }
 
 /** 逐句朗读,支持从某句开始、暂停/继续、句级回调。优先云端音频,回退浏览器。 */
@@ -176,7 +178,7 @@ export function speakSentences(sentences: string[], opts: TtsOptions): TtsContro
     try {
       await audio.play();
     } catch {
-      /* autoplay 限制,忽略 */
+      if (!stopped) opts.onBlocked?.(); // 多半是浏览器要求用户手势,交给上层提示
     }
   };
 
