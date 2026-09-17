@@ -90,6 +90,64 @@ export async function pickVoice(accent: Accent): Promise<SpeechSynthesisVoice | 
   return candidates[0] ?? voices.find((v) => v.lang.startsWith("en")) ?? null;
 }
 
+// ---------- 播放元素(逐句复用同一个 <audio>)----------
+// 手机浏览器的自动播放策略认「元素」不认「页面」:只有在用户手势里播过的那个
+// <audio>,之后才允许用脚本换 src 接着播。每句都 new Audio() 的话,读完一句、
+// 翻完一页或者锁屏之后的下一句就会被拦掉,连续听书就断在这里。
+
+/** 12ms 静音,只用来在用户手势里「解锁」播放元素 */
+const SILENT_WAV =
+  "data:audio/wav;base64,UklGRoQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YWAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA=";
+
+let sentenceAudio: HTMLAudioElement | null = null;
+let audioOwner: object | null = null; // 当前占用播放元素的控制器,避免旧控制器掐掉新的
+let audioUnlocked = false;
+let unlocking: Promise<void> | null = null;
+
+function getSentenceAudio(): HTMLAudioElement {
+  if (!sentenceAudio) {
+    sentenceAudio = new Audio();
+    sentenceAudio.preload = "auto";
+    sentenceAudio.setAttribute("playsinline", ""); // iOS:内联播放,别接管成全屏播放器
+  }
+  return sentenceAudio;
+}
+
+/** 在用户手势里同步调用:先播一小段静音把元素解锁,之后换 src 也能继续播 */
+function unlockSentenceAudio(el: HTMLAudioElement): Promise<void> {
+  if (audioUnlocked) return Promise.resolve();
+  if (unlocking) return unlocking;
+  unlocking = (async () => {
+    try {
+      el.src = SILENT_WAV;
+      await el.play();
+      el.pause();
+      audioUnlocked = true;
+    } catch {
+      /* 没解锁成功:第一句仍可能被拦,由 onBlocked 提示用户点一下 */
+    } finally {
+      unlocking = null;
+    }
+  })();
+  return unlocking;
+}
+
+function claimSentenceAudio(owner: object): HTMLAudioElement {
+  const el = getSentenceAudio();
+  el.onended = null;
+  el.onerror = null;
+  audioOwner = owner;
+  return el;
+}
+
+function releaseSentenceAudio(owner: object) {
+  if (!sentenceAudio || audioOwner !== owner) return;
+  sentenceAudio.onended = null;
+  sentenceAudio.onerror = null;
+  sentenceAudio.pause();
+  audioOwner = null;
+}
+
 export interface TtsController {
   stop: () => void;
   pause: () => void;
@@ -115,6 +173,9 @@ export function speakSentences(sentences: string[], opts: TtsOptions): TtsContro
   let audio: HTMLAudioElement | null = null;
   let mode: "pending" | "cloud" | "browser" = "pending";
   let current: "cloud" | "browser" = "cloud"; // 当前这句实际用的通道(暂停/继续要分开处理)
+  const owner = {};
+  // 这个函数是在点播放的手势里同步调用的,趁机把共用的播放元素解锁
+  const unlocked = unlockSentenceAudio(getSentenceAudio());
 
   // 浏览器合成单句(云端整体不可用、或云端这一句取不到音频时用)
   const speakOneBrowser = (cur: number, done: () => void) => {
@@ -163,7 +224,10 @@ export function speakSentences(sentences: string[], opts: TtsOptions): TtsContro
     current = "cloud";
     opts.onSentence?.(cur);
     if (cur + 1 < sentences.length) void fetchTtsUrl(sentences[cur + 1], opts.accent); // 预取
-    audio = new Audio(url);
+    await unlocked; // 等解锁的那一小段静音收尾,免得两次 play() 打架
+    if (stopped) return;
+    audio = claimSentenceAudio(owner);
+    audio.src = url;
     audio.playbackRate = clampRate(opts.rate);
     audio.onended = () => {
       if (stopped) return;
@@ -201,19 +265,21 @@ export function speakSentences(sentences: string[], opts: TtsOptions): TtsContro
   return {
     stop() {
       stopped = true;
-      audio?.pause();
+      releaseSentenceAudio(owner);
       audio = null;
       speechSynthesis.cancel();
     },
     pause() {
       paused = true;
-      if (current === "cloud") audio?.pause();
-      else speechSynthesis.pause();
+      if (current === "cloud") {
+        if (audioOwner === owner) audio?.pause();
+      } else speechSynthesis.pause();
     },
     resume() {
       paused = false;
-      if (current === "cloud") void audio?.play();
-      else speechSynthesis.resume();
+      if (current === "cloud") {
+        if (audioOwner === owner) void audio?.play();
+      } else speechSynthesis.resume();
     },
     get paused() {
       return paused;
