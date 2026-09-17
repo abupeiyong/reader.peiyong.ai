@@ -22,6 +22,9 @@ interface BookMeta {
 
 type Tab = "analysis" | "chat" | "vocab";
 
+/** 手机端断点,需与 styles.css 里的 @media 保持一致 */
+const MOBILE_QUERY = "(max-width: 720px)";
+
 export default function ReaderPage({
   bookId,
   user,
@@ -63,6 +66,9 @@ export default function ReaderPage({
   const [noteText, setNoteText] = useState("");
   const [noteBusy, setNoteBusy] = useState(false);
   const pageAreaRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
+  // 手机端页面宽度自适应屏幕,但不把这个临时缩放写回进度(否则会覆盖桌面端的缩放)
+  const savedZoom = useRef(zoom);
 
   const saveNote = async () => {
     if (!noteText.trim()) return;
@@ -87,7 +93,10 @@ export default function ReaderPage({
         const progress = await api.get<{ page_no: number; zoom: number }>(`/api/books/${bookId}/progress`);
         if (cancelled) return;
         setPageNo(Math.max(1, progress.page_no));
-        if (progress.zoom) setZoom(progress.zoom);
+        if (progress.zoom) {
+          savedZoom.current = progress.zoom;
+          setZoom(progress.zoom);
+        }
         const known = await api.get<string[]>("/api/known-words");
         if (!cancelled) setKnownWords(new Set(known));
         const loaded = await loadPdf({ url: `/api/books/${bookId}/file` }).promise;
@@ -212,6 +221,28 @@ export default function ReaderPage({
     };
   }, [doc, pageNo]);
 
+  // 手机端:页面缩放自适应屏幕宽度,避免正文被截断或需要横向滚动;转屏后重算
+  useEffect(() => {
+    if (!isMobile || !doc) return;
+    let cancelled = false;
+    const fit = () => {
+      void doc.getPage(pageNo).then((page) => {
+        const base = page.getViewport({ scale: 1 }).width;
+        const avail = (pageAreaRef.current?.clientWidth ?? window.innerWidth) - 16;
+        if (cancelled || base <= 0 || avail <= 0) return;
+        setZoom(Math.min(2.4, Math.max(0.3, +(avail / base).toFixed(2))));
+      });
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    window.addEventListener("orientationchange", fit);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("resize", fit);
+      window.removeEventListener("orientationchange", fit);
+    };
+  }, [isMobile, doc, pageNo]);
+
   // 个性化生词提示(词汇模型)
   useEffect(() => {
     setModelHints([]);
@@ -266,11 +297,20 @@ export default function ReaderPage({
     if (!book) return;
     if (saveProgress.current) clearTimeout(saveProgress.current);
     saveProgress.current = window.setTimeout(() => {
-      void api.put(`/api/books/${bookId}/progress`, { page_no: pageNo, zoom });
+      // 手机端的自适应缩放只是显示用的,存回上次手动设置的值
+      void api.put(`/api/books/${bookId}/progress`, { page_no: pageNo, zoom: isMobile ? savedZoom.current : zoom });
     }, 800);
-  }, [pageNo, zoom, bookId, book]);
+  }, [pageNo, zoom, bookId, book, isMobile]);
 
   const pageCount = doc?.numPages ?? book?.page_count ?? 1;
+
+  const changeZoom = useCallback((delta: number) => {
+    setZoom((z) => {
+      const next = Math.min(2.4, Math.max(0.6, +(z + delta).toFixed(2)));
+      savedZoom.current = next;
+      return next;
+    });
+  }, []);
 
   const gotoPage = useCallback(
     (p: number, flash = false) => {
@@ -371,7 +411,9 @@ export default function ReaderPage({
   return (
     <div className="reader">
       <header className="reader-header">
-        <button className="btn btn-ghost" onClick={() => (location.hash = "#/")}><Icon name="arrow-left" /> Library</button>
+        <button className="btn btn-ghost" title="Back to library" onClick={() => (location.hash = "#/")}>
+          <Icon name="arrow-left" /> <span className="btn-label">Library</span>
+        </button>
         {toc.length > 0 && (
           <button className="icon-btn" title="Table of contents" onClick={() => setShowToc(true)}>
             <Icon name="list" />
@@ -403,9 +445,9 @@ export default function ReaderPage({
         </div>
 
         <div className="reader-zoom">
-          <button className="icon-btn" onClick={() => setZoom((z) => Math.max(0.6, +(z - 0.15).toFixed(2)))}><Icon name="minus" /></button>
+          <button className="icon-btn" onClick={() => changeZoom(-0.15)}><Icon name="minus" /></button>
           <span>{Math.round(zoom * 100)}%</span>
-          <button className="icon-btn" onClick={() => setZoom((z) => Math.min(2.4, +(z + 0.15).toFixed(2)))}><Icon name="plus" /></button>
+          <button className="icon-btn" onClick={() => changeZoom(0.15)}><Icon name="plus" /></button>
         </div>
 
         <div className="reader-search">
@@ -436,13 +478,15 @@ export default function ReaderPage({
           title={showHints ? "Turn off word hints (immersive mode)" : "Turn on word hints"}
           onClick={toggleHints}
         >
-          {showHints ? (<><Icon name="sun" /> Hints On</>) : (<><Icon name="moon" /> Immersive</>)}
+          {showHints
+            ? (<><Icon name="sun" /> <span className="btn-label">Hints On</span></>)
+            : (<><Icon name="moon" /> <span className="btn-label">Immersive</span></>)}
         </button>
-        <button className="btn btn-ghost" title="Read this page aloud" onClick={() => { setShowTtsBar(true); setTtsCommand({ action: "playPage", index: 0, nonce: Date.now() }); }}>
-          <Icon name="volume" /> Read aloud
+        <button className="btn btn-ghost read-aloud-btn" title="Read this page aloud" onClick={() => { setShowTtsBar(true); setTtsCommand({ action: "playPage", index: 0, nonce: Date.now() }); }}>
+          <Icon name="volume" /> <span className="btn-label">Read aloud</span>
         </button>
         <button className="btn btn-ghost" title="Add a note" onClick={() => setShowNote(true)}>
-          <Icon name="message" /> Note
+          <Icon name="message" /> <span className="btn-label">Note</span>
         </button>
       </header>
 
@@ -528,13 +572,17 @@ export default function ReaderPage({
         </aside>
       </div>
 
-      {showTtsBar && (
+      {/* 手机端把播放器常驻在底部:右侧 AI 面板此时不展示,整页就是一个听书界面 */}
+      {(showTtsBar || isMobile) && (
         <ReadAloudBar
           paragraphs={paragraphs}
           pageNo={pageNo}
           command={ttsCommand}
           onHighlight={setTtsHighlight}
           onClose={() => { setShowTtsBar(false); setTtsHighlight(null); }}
+          hasNextPage={pageNo < pageCount}
+          onNextPage={() => gotoPage(pageNo + 1)}
+          persistent={isMobile}
         />
       )}
 
@@ -620,6 +668,19 @@ export default function ReaderPage({
       )}
     </div>
   );
+}
+
+/** 是否手机窄屏(跟 CSS 断点同源,转屏时会跟着变) */
+function useIsMobile(): boolean {
+  const [mobile, setMobile] = useState(() => window.matchMedia(MOBILE_QUERY).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE_QUERY);
+    const fn = (e: MediaQueryListEvent) => setMobile(e.matches);
+    mq.addEventListener("change", fn);
+    setMobile(mq.matches);
+    return () => mq.removeEventListener("change", fn);
+  }, []);
+  return mobile;
 }
 
 /** 会话计时显示:mm:ss,超 1 小时 h:mm:ss */

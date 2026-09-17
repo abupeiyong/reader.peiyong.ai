@@ -456,6 +456,17 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
   padding: 10px 16px; z-index: 60;
 }
 .tts-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* 主播放键:朗读栏里最显眼的东西 */
+.tts-main {
+  width: 44px; height: 44px; padding: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--primary); color: #fbf9f3;
+  box-shadow: 0 2px 12px rgba(124, 91, 59, 0.35);
+}
+.tts-main:hover:not(:disabled) { background: var(--primary-dark); color: #fff; }
+.tts-main:disabled { opacity: 0.4; }
+
 .tts-rate { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .tts-rate input { width: 90px; accent-color: var(--primary); }
 .tts-controls select { border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px; background: #fff; color: var(--text); }
@@ -661,4 +672,53 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 @media (max-width: 1000px) {
   .side-panel { min-width: 340px; width: 44%; }
   .tts-bar { width: calc(100% - 40px); }
+}
+
+/* ---------- 手机端:一个「听书」界面 ----------
+   右侧 AI 面板在手机上放不下,索性收起;整屏留给正文,
+   底部常驻播放器 + 放大的播放键,整页读完自动翻页续播。 */
+@media (max-width: 720px) {
+  .side-panel { display: none; }
+
+  /* 正常一行放得下;极窄屏(<340px)允许换行,免得按钮被裁掉 */
+  .reader-header { gap: 2px; padding: 6px 8px; flex-wrap: wrap; }
+  .reader-header .btn { padding: 8px 9px; }
+  .btn-label { display: none; }
+  /* 底部常驻播放器已经有醒目的播放键,头部这颗和页数总计就不占地方了 */
+  .reader-timer, .reader-zoom, .page-total, .read-aloud-btn { display: none; }
+  .reader-title { max-width: none; flex: 1; min-width: 0; font-size: 13px; }
+  .reader-nav { gap: 0; }
+  .page-input { width: 40px; padding: 4px 2px; }
+
+  /* 搜索框默认收成一个小方块,聚焦时再展开,省出标题的位置 */
+  .reader-search input { width: 36px; padding: 7px 10px; transition: width 0.18s ease; }
+  .reader-search input:focus { width: 150px; outline: none; border-color: var(--primary); }
+  .search-results { position: fixed; top: 50px; left: 8px; right: 8px; width: auto; max-height: 60vh; }
+
+  /* 底部给常驻播放器留位置 */
+  .pdf-area { padding: 8px 6px 130px; }
+  .pdf-page-wrap { margin-bottom: 0; }
+  .ocr-banner { flex-direction: column; align-items: flex-start; }
+  /* 段落播放按钮挂在页面左外侧,窄屏放不下;手机上用底部播放器整页听 */
+  .para-buttons { display: none; }
+
+  .tts-bar {
+    left: 0; right: 0; bottom: 0; width: auto; transform: none;
+    border-radius: 16px 16px 0 0; border-left: none; border-right: none; border-bottom: none;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  }
+  .tts-main { width: 54px; height: 54px; }
+  .tts-rate { margin-left: auto; }
+  .tts-rate input { width: 72px; }
+  .tts-progress { height: 18px; border-radius: 9px; }
+  .tts-progress-fill { border-radius: 9px; }
+
+  /* 书库 */
+  .lib-header { padding: 12px 14px; }
+  .lib-main { padding: 18px 14px; }
+  .lib-toolbar { flex-wrap: wrap; gap: 10px; }
+  .book-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .book-cover { height: 110px; font-size: 14px; }
+  /* 手机上没有 hover,删除/编辑按钮直接常显 */
+  .book-del, .book-edit { opacity: 1; }
 }

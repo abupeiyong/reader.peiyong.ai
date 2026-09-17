@@ -9,11 +9,29 @@ interface Props {
   command: { action: "playParagraph" | "playPage"; index: number; nonce: number } | null;
   onHighlight: (h: { paraIndex: number; sentIndex: number } | null) => void;
   onClose: () => void;
+  /** 还有下一页可读(整页朗读读完后自动续播用) */
+  hasNextPage: boolean;
+  /** 连续播放时翻到下一页 */
+  onNextPage: () => void;
+  /** 常驻模式(手机端):朗读栏不可关闭,隐藏关闭按钮 */
+  persistent?: boolean;
 }
 
 type Mode = "idle" | "playing" | "paused";
 
-export default function ReadAloudBar({ paragraphs, pageNo, command, onHighlight, onClose }: Props) {
+/** 连续播放时最多连翻几页空白/插图页,避免在无文本的书里一直翻下去 */
+const MAX_SKIP_PAGES = 3;
+
+export default function ReadAloudBar({
+  paragraphs,
+  pageNo,
+  command,
+  onHighlight,
+  onClose,
+  hasNextPage,
+  onNextPage,
+  persistent,
+}: Props) {
   const [mode, setMode] = useState<Mode>("idle");
   const [accent, setAccent] = useState<Accent>("US");
   const [rate, setRate] = useState(1.0);
@@ -22,8 +40,16 @@ export default function ReadAloudBar({ paragraphs, pageNo, command, onHighlight,
   const ttsRef = useRef<TtsController | null>(null);
   const accentRef = useRef(accent);
   const rateRef = useRef(rate);
+  const hasNextPageRef = useRef(hasNextPage);
+  const onNextPageRef = useRef(onNextPage);
   accentRef.current = accent;
   rateRef.current = rate;
+  hasNextPageRef.current = hasNextPage;
+  onNextPageRef.current = onNextPage;
+
+  // 连续播放:翻页后等新一页段落就绪再接着读
+  const autoPlayNextRef = useRef(false);
+  const skippedPagesRef = useRef(0);
 
   const para = paragraphs[paraIndex];
 
@@ -57,10 +83,19 @@ export default function ReadAloudBar({ paragraphs, pageNo, command, onHighlight,
         const next = findNextReadable(paragraphs, pIdx);
         if (pageModeRef.current && next !== -1) {
           play(next, 0);
-        } else {
-          setMode("idle");
-          onHighlight(null);
+          return;
         }
+        // 整页读完:有声书式连续播放,自动翻到下一页接着读
+        if (pageModeRef.current && hasNextPageRef.current) {
+          onHighlight(null);
+          autoPlayNextRef.current = true;
+          skippedPagesRef.current = 0;
+          setMode("playing");
+          onNextPageRef.current();
+          return;
+        }
+        setMode("idle");
+        onHighlight(null);
       },
     });
   };
@@ -85,16 +120,38 @@ export default function ReadAloudBar({ paragraphs, pageNo, command, onHighlight,
   // 翻页时停止。注意只在 pageNo 真的变了时才停:
   // 挂载时这个 effect 也会跑一次,而此时上面的 command effect 已经起了播放,
   // 无条件 stopAll 会把它掐掉 —— 表现就是「朗读栏没开着时,第一次点播放没反应」。
+  // 连续播放自己翻的页不算「用户中断」,保持 playing,等新页段落到了接着读。
   const lastPageRef = useRef(pageNo);
   useEffect(() => {
     if (lastPageRef.current === pageNo) return;
     lastPageRef.current = pageNo;
     stopAll();
-    setMode("idle");
+    if (!autoPlayNextRef.current) setMode("idle");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageNo]);
 
+  // 连续播放:新一页段落解析好后接着读;整页无可读文本(插图/空白页)就继续往后翻
+  useEffect(() => {
+    if (!autoPlayNextRef.current) return;
+    const idx = findNextReadable(paragraphs, -1);
+    if (idx !== -1) {
+      autoPlayNextRef.current = false;
+      pageModeRef.current = true;
+      play(idx, 0);
+      return;
+    }
+    if (hasNextPageRef.current && skippedPagesRef.current < MAX_SKIP_PAGES) {
+      skippedPagesRef.current += 1;
+      onNextPageRef.current();
+      return;
+    }
+    autoPlayNextRef.current = false;
+    setMode("idle");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paragraphs]);
+
   const pause = () => {
+    autoPlayNextRef.current = false; // 正好卡在翻页间隙暂停:别再自动续上
     ttsRef.current?.pause();
     setMode("paused");
   };
@@ -103,33 +160,36 @@ export default function ReadAloudBar({ paragraphs, pageNo, command, onHighlight,
     setMode("playing");
   };
   const stop = () => {
+    autoPlayNextRef.current = false;
     stopAll();
     setMode("idle");
   };
 
-  if (paragraphs.length === 0) return null;
+  const firstReadable = findNextReadable(paragraphs, -1);
 
   return (
     <div className="tts-bar">
       <div className="tts-controls">
         {mode === "playing" ? (
-          <button className="icon-btn big" title="Pause" onClick={pause}><Icon name="pause" size={20} /></button>
+          <button className="icon-btn big tts-main" title="Pause" aria-label="Pause" onClick={pause}><Icon name="pause" size={22} /></button>
         ) : mode === "paused" ? (
-          <button className="icon-btn big" title="Resume" onClick={resume}><Icon name="play" size={20} /></button>
+          <button className="icon-btn big tts-main" title="Resume" aria-label="Resume" onClick={resume}><Icon name="play" size={22} /></button>
         ) : (
           <button
-            className="icon-btn big"
-            title="Read this page aloud"
+            className="icon-btn big tts-main"
+            title="Listen to this book from here"
+            aria-label="Play"
+            disabled={firstReadable === -1}
             onClick={() => {
               pageModeRef.current = true;
-              const idx = findNextReadable(paragraphs, -1);
-              if (idx !== -1) play(idx);
+              skippedPagesRef.current = 0;
+              if (firstReadable !== -1) play(firstReadable);
             }}
           >
-            <Icon name="play" size={20} />
+            <Icon name="play" size={22} />
           </button>
         )}
-        <button className="icon-btn" title="Stop" onClick={stop}><Icon name="stop" size={17} /></button>
+        <button className="icon-btn" title="Stop" aria-label="Stop" onClick={stop}><Icon name="stop" size={17} /></button>
 
         <select value={accent} onChange={(e) => setAccent(e.target.value as Accent)} title="Accent">
           <option value="US">US</option>
@@ -141,7 +201,9 @@ export default function ReadAloudBar({ paragraphs, pageNo, command, onHighlight,
           <input type="range" min="0.5" max="1.5" step="0.1" value={rate} onChange={(e) => setRate(Number(e.target.value))} />
         </label>
 
-        <button className="icon-btn tts-close" title="Close" onClick={() => { stop(); onClose(); }}><Icon name="x" /></button>
+        {!persistent && (
+          <button className="icon-btn tts-close" title="Close" onClick={() => { stop(); onClose(); }}><Icon name="x" /></button>
+        )}
       </div>
 
       {(mode === "playing" || mode === "paused") && para && (() => {
@@ -177,7 +239,7 @@ export default function ReadAloudBar({ paragraphs, pageNo, command, onHighlight,
             >
               <div className="tts-progress-fill" style={{ width: `${pct}%` }} />
             </div>
-            <span className="tts-progress-count">{cur + 1} / {scope.length}</span>
+            <span className="tts-progress-count">p.{pageNo} · {cur + 1} / {scope.length}</span>
           </div>
         );
       })()}
