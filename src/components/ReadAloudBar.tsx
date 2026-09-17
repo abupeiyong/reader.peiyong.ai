@@ -38,6 +38,8 @@ export default function ReadAloudBar({
   const [paraIndex, setParaIndex] = useState(0);
   const [sentIndex, setSentIndex] = useState(0);
   const ttsRef = useRef<TtsController | null>(null);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   const accentRef = useRef(accent);
   const rateRef = useRef(rate);
   const hasNextPageRef = useRef(hasNextPage);
@@ -117,7 +119,7 @@ export default function ReadAloudBar({
       ttsRef.current?.stop();
     };
   }, []);
-  // 翻页时停止。注意只在 pageNo 真的变了时才停:
+  // 翻页时停掉当前页的播放。注意只在 pageNo 真的变了时才停:
   // 挂载时这个 effect 也会跑一次,而此时上面的 command effect 已经起了播放,
   // 无条件 stopAll 会把它掐掉 —— 表现就是「朗读栏没开着时,第一次点播放没反应」。
   // 连续播放自己翻的页不算「用户中断」,保持 playing,等新页段落到了接着读。
@@ -126,6 +128,17 @@ export default function ReadAloudBar({
     if (lastPageRef.current === pageNo) return;
     lastPageRef.current = pageNo;
     stopAll();
+    // 正在整页连播时用户自己翻页(或点目录/搜索跳页):这不是「停止播放」,
+    // 到新的一页从头接着读,只有暂停/停止键才会让它安静下来。
+    // autoPlayNextRef 已经是 true 说明这页是连播自己翻的,别动跳过计数,
+    // 否则遇到连着的插图页会一直翻到书尾。
+    if (modeRef.current === "playing" && pageModeRef.current) {
+      if (!autoPlayNextRef.current) {
+        autoPlayNextRef.current = true;
+        skippedPagesRef.current = 0;
+      }
+      return;
+    }
     if (!autoPlayNextRef.current) setMode("idle");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageNo]);
@@ -156,7 +169,19 @@ export default function ReadAloudBar({
     setMode("paused");
   };
   const resume = () => {
-    ttsRef.current?.resume();
+    // 正好卡在翻页空档按的暂停:控制器已经随翻页停掉了,从这一页开头接着读
+    if (!ttsRef.current) {
+      const idx = findNextReadable(paragraphs, -1);
+      if (idx === -1) {
+        setMode("idle");
+        return;
+      }
+      pageModeRef.current = true;
+      skippedPagesRef.current = 0;
+      play(idx, 0);
+      return;
+    }
+    ttsRef.current.resume();
     setMode("playing");
   };
   const stop = () => {
