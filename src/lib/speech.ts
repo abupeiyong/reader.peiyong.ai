@@ -311,3 +311,53 @@ export async function speakWord(word: string, accent: Accent = "US"): Promise<vo
   u.rate = 0.9;
   speechSynthesis.speak(u);
 }
+
+// ---------- 提示语朗读(专注提醒)----------
+// 和单词发音同一条链路(云端优先、浏览器兜底),但留一个停止口子:
+// 用户点「回去读」关掉卡片时,话也得跟着停。
+
+let noticeAudio: HTMLAudioElement | null = null;
+let noticeSpeaking = false;
+let noticeGen = 0; // 取音频要等网络,期间卡片可能已经关了 —— 用它把过期的那句丢掉
+
+/** 朗读一句提示语:优先云端音色,回退浏览器合成;被浏览器拦下就静默放弃 */
+export async function speakNotice(text: string, accent: Accent = "US"): Promise<void> {
+  stopNotice();
+  const gen = noticeGen;
+  const url = await fetchTtsUrl(text, accent);
+  if (gen !== noticeGen) return;
+  if (url) {
+    const el = new Audio(url);
+    noticeAudio = el;
+    try {
+      await el.play();
+      return;
+    } catch {
+      if (noticeAudio === el) noticeAudio = null; // 自动播放被拦,试试浏览器合成
+    }
+  }
+  const voice = await pickVoice(accent);
+  if (gen !== noticeGen) return;
+  const u = new SpeechSynthesisUtterance(text);
+  if (voice) u.voice = voice;
+  u.lang = accent === "US" ? "en-US" : "en-GB";
+  u.rate = 0.95;
+  u.onend = u.onerror = () => {
+    noticeSpeaking = false;
+  };
+  noticeSpeaking = true;
+  speechSynthesis.speak(u);
+}
+
+/** 停掉提示语(只停自己念的那句,不碰正在听的书) */
+export function stopNotice(): void {
+  noticeGen += 1;
+  if (noticeAudio) {
+    noticeAudio.pause();
+    noticeAudio = null;
+  }
+  if (noticeSpeaking) {
+    noticeSpeaking = false;
+    speechSynthesis.cancel();
+  }
+}

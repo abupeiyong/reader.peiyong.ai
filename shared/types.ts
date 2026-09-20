@@ -123,6 +123,6 @@ export interface Stats {
 export const DAILY_GOAL_MS = 3 * 60 * 60 * 1000;
 
 export interface ReadingToday {
-  ms: number;       // 今天(用户本地日)已读的 active_ms 总和
+  ms: number;       // 今天(用户本地日)已读的 active_ms 总和(带 exclude 时不含被排除的那次会话)
   goal_ms: number;  // 当日目标
 }
