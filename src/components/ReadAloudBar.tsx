@@ -22,6 +22,10 @@ type Mode = "idle" | "playing" | "paused";
 /** 连续播放时最多连翻几页空白/插图页,避免在无文本的书里一直翻下去 */
 const MAX_SKIP_PAGES = 3;
 
+// 控件上只留播放/停止两个键,口音和语速用固定值
+const ACCENT: Accent = "US";
+const RATE = 1.0;
+
 export default function ReadAloudBar({
   paragraphs,
   pageNo,
@@ -33,27 +37,17 @@ export default function ReadAloudBar({
   persistent,
 }: Props) {
   const [mode, setMode] = useState<Mode>("idle");
-  const [accent, setAccent] = useState<Accent>("US");
-  const [rate, setRate] = useState(1.0);
-  const [paraIndex, setParaIndex] = useState(0);
-  const [sentIndex, setSentIndex] = useState(0);
   const ttsRef = useRef<TtsController | null>(null);
   const modeRef = useRef(mode);
   modeRef.current = mode;
-  const accentRef = useRef(accent);
-  const rateRef = useRef(rate);
   const hasNextPageRef = useRef(hasNextPage);
   const onNextPageRef = useRef(onNextPage);
-  accentRef.current = accent;
-  rateRef.current = rate;
   hasNextPageRef.current = hasNextPage;
   onNextPageRef.current = onNextPage;
 
   // 连续播放:翻页后等新一页段落就绪再接着读
   const autoPlayNextRef = useRef(false);
   const skippedPagesRef = useRef(0);
-
-  const para = paragraphs[paraIndex];
 
   const stopAll = () => {
     ttsRef.current?.stop();
@@ -65,17 +59,12 @@ export default function ReadAloudBar({
     stopAll();
     const target = paragraphs[pIdx];
     if (!target || target.sentences.length === 0) return;
-    setParaIndex(pIdx);
-    setSentIndex(sIdx);
     setMode("playing");
     ttsRef.current = speakSentences(target.sentences, {
-      accent: accentRef.current,
-      rate: rateRef.current,
+      accent: ACCENT,
+      rate: RATE,
       startIndex: sIdx,
-      onSentence: (i) => {
-        setSentIndex(i);
-        onHighlight({ paraIndex: pIdx, sentIndex: i });
-      },
+      onSentence: (i) => onHighlight({ paraIndex: pIdx, sentIndex: i }),
       onBlocked: () => {
         // 浏览器拒绝了自动播放:显示成暂停,用户点一下(带手势)就能继续
         setMode("paused");
@@ -216,59 +205,10 @@ export default function ReadAloudBar({
         )}
         <button className="icon-btn" title="Stop" aria-label="Stop" onClick={stop}><Icon name="stop" size={17} /></button>
 
-        <select value={accent} onChange={(e) => setAccent(e.target.value as Accent)} title="Accent">
-          <option value="US">US</option>
-          <option value="GB">UK</option>
-        </select>
-
-        <label className="tts-rate">
-          Speed {rate.toFixed(1)}x
-          <input type="range" min="0.5" max="1.5" step="0.1" value={rate} onChange={(e) => setRate(Number(e.target.value))} />
-        </label>
-
         {!persistent && (
           <button className="icon-btn tts-close" title="Close" onClick={() => { stop(); onClose(); }}><Icon name="x" /></button>
         )}
       </div>
-
-      {(mode === "playing" || mode === "paused") && para && (() => {
-        // 播放进度条:整页模式覆盖全页可读句子,段落模式只覆盖当前段;点击跳到对应句
-        const scope: { p: number; s: number }[] = [];
-        if (pageModeRef.current) {
-          for (let p = 0; p < paragraphs.length; p++) {
-            if (paragraphs[p].sentences.length === 0 || paragraphs[p].text.split(" ").length < 4) continue;
-            for (let s = 0; s < paragraphs[p].sentences.length; s++) scope.push({ p, s });
-          }
-        } else {
-          for (let s = 0; s < para.sentences.length; s++) scope.push({ p: paraIndex, s });
-        }
-        const cur = Math.max(0, scope.findIndex((x) => x.p === paraIndex && x.s === sentIndex));
-        const pct = scope.length ? ((cur + 1) / scope.length) * 100 : 0;
-        const seek = (e: React.MouseEvent<HTMLDivElement>) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          const frac = Math.min(0.999, Math.max(0, (e.clientX - rect.left) / rect.width));
-          const target = scope[Math.floor(frac * scope.length)];
-          if (target) play(target.p, target.s);
-        };
-        return (
-          <div className="tts-progress-row">
-            <div
-              className="tts-progress"
-              role="slider"
-              aria-label="Playback position"
-              aria-valuemin={1}
-              aria-valuemax={scope.length}
-              aria-valuenow={cur + 1}
-              title="Click to jump"
-              onClick={seek}
-            >
-              <div className="tts-progress-fill" style={{ width: `${pct}%` }} />
-            </div>
-            <span className="tts-progress-count">p.{pageNo} · {cur + 1} / {scope.length}</span>
-          </div>
-        );
-      })()}
-
     </div>
   );
 }
