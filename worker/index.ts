@@ -8,7 +8,7 @@ import { estimateVocabRank, hintsForText, applyReview, priorRank, type ReviewGra
 import { wordRank } from "./wordfreq";
 import { telegramEnabled, handleUpdate, runDailyPush } from "./telegram";
 import { generateCover } from "./cover";
-import type { ChatScope } from "../shared/types";
+import { DAILY_GOAL_MS, type ChatScope, type ReadingToday } from "../shared/types";
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>();
 
@@ -1046,6 +1046,20 @@ api.patch("/reading-sessions/:id", async (c) => {
     )
     .run();
   return c.json({ ok: true });
+});
+
+// 今天(用户本地日)已读总时长 + 当日目标,供阅读页的专注提醒用
+api.get("/reading-today", async (c) => {
+  const raw = Number(c.req.query("tzoff") ?? 0); // 分钟(getTimezoneOffset)
+  const tzoff = Number.isFinite(raw) ? raw : 0;
+  const dayStart = Math.floor((now() - tzoff * 60000) / 86400000) * 86400000 + tzoff * 60000;
+  const row = await c.env.DB.prepare(
+    "SELECT COALESCE(SUM(active_ms), 0) AS ms FROM reading_sessions WHERE user_id = ? AND started_at >= ?"
+  )
+    .bind(c.get("userId"), dayStart)
+    .first<{ ms: number }>();
+  const body: ReadingToday = { ms: row?.ms ?? 0, goal_ms: DAILY_GOAL_MS };
+  return c.json(body);
 });
 
 // ---------- 日历回顾:按本地日聚合 书 / 词 / 笔记 ----------

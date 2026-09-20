@@ -118,3 +118,11 @@ export interface Stats {
   vocab_rank: number;
   vocab_trend: VocabSnapshot[];
 }
+
+/** 每日阅读目标:3 小时 */
+export const DAILY_GOAL_MS = 3 * 60 * 60 * 1000;
+
+export interface ReadingToday {
+  ms: number;       // 今天(用户本地日)已读的 active_ms 总和
+  goal_ms: number;  // 当日目标
+}
