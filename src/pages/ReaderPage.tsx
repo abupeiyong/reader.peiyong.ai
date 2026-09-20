@@ -179,12 +179,14 @@ export default function ReaderPage({
         .catch(() => {});
     };
 
-    // 提醒里的数字要准:先把本次会话落库,再问后端今天一共读了多久
+    // 提醒上的是「今天一共读了多久」,不是这一次读了多久:
+    // 后端汇总今天其它会话(排除本次,免得和下面的实时时长重复),再加上本次会话的实时 active
     const nudgeNow = async () => {
-      await save(false);
       try {
-        const r = await api.get<ReadingToday>(`/api/reading-today?tzoff=${new Date().getTimezoneOffset()}`);
-        if (!disposed) setNudge({ ...r, at: Date.now() });
+        const q = new URLSearchParams({ tzoff: String(new Date().getTimezoneOffset()) });
+        if (sessionId) q.set("exclude", sessionId);
+        const r = await api.get<ReadingToday>(`/api/reading-today?${q}`);
+        if (!disposed) setNudge({ ...r, ms: r.ms + active, at: Date.now() });
       } catch {
         /* 拿不到今日时长就跳过这次提醒 */
       }
