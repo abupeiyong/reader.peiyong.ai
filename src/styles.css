@@ -449,28 +449,24 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 
 /* ---------- 朗读栏 ---------- */
 
+/* 小控件:只有播放/停止(桌面端多一个关闭),浮在正文左上角,不占底部 */
 .tts-bar {
-  position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px;
-  width: min(720px, calc(100% - 380px)); background: var(--panel);
-  border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 8px 30px rgba(50, 38, 20, 0.22);
-  padding: 10px 16px; z-index: 60;
+  position: fixed; top: 64px; left: 18px;
+  background: var(--panel);
+  border: 1px solid var(--border); border-radius: 999px; box-shadow: 0 6px 20px rgba(50, 38, 20, 0.2);
+  padding: 5px 8px; z-index: 60;
 }
-.tts-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tts-controls { display: flex; align-items: center; gap: 4px; }
 
-/* 主播放键:朗读栏里最显眼的东西 */
+/* 主播放键:控件里最显眼的东西 */
 .tts-main {
-  width: 44px; height: 44px; padding: 0; border-radius: 50%;
+  width: 38px; height: 38px; padding: 0; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--primary); color: #fbf9f3;
   box-shadow: 0 2px 12px rgba(124, 91, 59, 0.35);
 }
 .tts-main:hover:not(:disabled) { background: var(--primary-dark); color: #fff; }
 .tts-main:disabled { opacity: 0.4; }
-
-.tts-rate { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
-.tts-rate input { width: 90px; accent-color: var(--primary); }
-.tts-controls select { border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px; background: #fff; color: var(--text); }
-.tts-close { margin-left: auto; }
 .tts-sentences {
   margin-top: 8px; max-height: 110px; overflow-y: auto; font-size: 13px;
   line-height: 1.8; color: #55503f; border-top: 1px solid #efe9d9; padding-top: 8px;
@@ -478,24 +474,6 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .tts-sent { cursor: pointer; border-radius: 4px; padding: 1px 2px; }
 .tts-sent:hover { background: #f1ecdd; }
 .tts-sent.active { background: rgba(233, 196, 106, 0.45); color: var(--text); }
-
-/* 播放进度长条(替代播放时的整段文字) */
-.tts-progress-row {
-  display: flex; align-items: center; gap: 10px;
-  margin-top: 10px; border-top: 1px solid #efe9d9; padding-top: 10px;
-}
-.tts-progress {
-  position: relative; flex: 1; height: 14px; border-radius: 7px;
-  background: #eee8d8; cursor: pointer; overflow: hidden;
-}
-.tts-progress:hover { background: #e7dfc9; }
-.tts-progress-fill {
-  position: absolute; top: 0; left: 0; bottom: 0; border-radius: 7px;
-  background: var(--primary); transition: width 0.25s ease;
-}
-.tts-progress-count {
-  font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
-}
 
 /* ---------- 复习闪卡 ---------- */
 
@@ -671,12 +649,11 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 /* 窄屏 */
 @media (max-width: 1000px) {
   .side-panel { min-width: 340px; width: 44%; }
-  .tts-bar { width: calc(100% - 40px); }
 }
 
 /* ---------- 手机端:一个「听书」界面 ----------
    右侧 AI 面板在手机上放不下,索性收起;整屏留给正文,
-   底部常驻播放器 + 放大的播放键,整页读完自动翻页续播。 */
+   常驻的小播放控件 + 放大的播放键,整页读完自动翻页续播。 */
 @media (max-width: 720px) {
   .side-panel { display: none; }
 
@@ -684,7 +661,7 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
   .reader-header { gap: 2px; padding: 6px 8px; flex-wrap: wrap; }
   .reader-header .btn { padding: 8px 9px; }
   .btn-label { display: none; }
-  /* 底部常驻播放器已经有醒目的播放键,头部这颗和页数总计就不占地方了 */
+  /* 常驻播放控件已经有醒目的播放键,头部这颗和页数总计就不占地方了 */
   .reader-timer, .reader-zoom, .page-total, .read-aloud-btn { display: none; }
   .reader-title { max-width: none; flex: 1; min-width: 0; font-size: 13px; }
   .reader-nav { gap: 0; }
@@ -695,23 +672,14 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
   .reader-search input:focus { width: 150px; outline: none; border-color: var(--primary); }
   .search-results { position: fixed; top: 50px; left: 8px; right: 8px; width: auto; max-height: 60vh; }
 
-  /* 底部给常驻播放器留位置 */
-  .pdf-area { padding: 8px 6px 130px; }
+  .pdf-area { padding: 8px 6px 24px; }
   .pdf-page-wrap { margin-bottom: 0; }
   .ocr-banner { flex-direction: column; align-items: flex-start; }
-  /* 段落播放按钮挂在页面左外侧,窄屏放不下;手机上用底部播放器整页听 */
+  /* 段落播放按钮挂在页面左外侧,窄屏放不下;手机上用常驻控件整页听 */
   .para-buttons { display: none; }
 
-  .tts-bar {
-    left: 0; right: 0; bottom: 0; width: auto; transform: none;
-    border-radius: 16px 16px 0 0; border-left: none; border-right: none; border-bottom: none;
-    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
-  }
-  .tts-main { width: 54px; height: 54px; }
-  .tts-rate { margin-left: auto; }
-  .tts-rate input { width: 72px; }
-  .tts-progress { height: 18px; border-radius: 9px; }
-  .tts-progress-fill { border-radius: 9px; }
+  .tts-bar { top: 56px; left: 10px; }
+  .tts-main { width: 44px; height: 44px; }
 
   /* 书库 */
   .lib-header { padding: 12px 14px; }
