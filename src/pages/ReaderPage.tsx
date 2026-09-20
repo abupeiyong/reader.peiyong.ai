@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import type { PageAnalysis, User } from "../../shared/types";
+import type { PageAnalysis, ReadingToday, User } from "../../shared/types";
 import { pdfjs, loadPdf, type PDFDocumentProxy } from "../lib/pdf";
 import { extractPage, splitSentences, type Paragraph } from "../lib/pdfText";
 import { extractToc, type TocItem } from "../lib/toc";
@@ -11,6 +11,7 @@ import ChatTab from "../components/ChatTab";
 import VocabTab from "../components/VocabTab";
 import ReadAloudBar from "../components/ReadAloudBar";
 import ReviewModal from "../components/ReviewModal";
+import FocusNudge from "../components/FocusNudge";
 import { Icon } from "../components/Icon";
 
 interface BookMeta {
@@ -61,11 +62,14 @@ export default function ReaderPage({
   const [toc, setToc] = useState<TocItem[]>([]);
   const [showToc, setShowToc] = useState(false);
   const [timer, setTimer] = useState<{ ms: number; paused: boolean }>({ ms: 0, paused: false });
+  const [nudge, setNudge] = useState<(ReadingToday & { at: number }) | null>(null);
   const [textDamaged, setTextDamaged] = useState(false);
   const [showNote, setShowNote] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [noteBusy, setNoteBusy] = useState(false);
   const pageAreaRef = useRef<HTMLDivElement>(null);
+  // 在听朗读也是在读:记下最后一次句子高亮的时间,免得听书时被当成走神
+  const lastTtsRef = useRef(0);
   const isMobile = useIsMobile();
   // 手机端页面宽度自适应屏幕,但不把这个临时缩放写回进度(否则会覆盖桌面端的缩放)
   const savedZoom = useRef(zoom);
@@ -120,7 +124,8 @@ export default function ReaderPage({
     };
   }, [doc]);
 
-  // 阅读计时:进书开始,离开结束;1 分钟无操作暂停计时(计入 idle 并记一次中断),有操作恢复
+  // 阅读计时:进书开始,离开结束;1 分钟无操作暂停计时(计入 idle 并记一次中断),有操作恢复。
+  // 同时盯着「走神」:切走页面 / 窗口失焦 / 长时间没动作,就弹专注提醒,之后每 10 分钟再提醒一次。
   useEffect(() => {
     let sessionId: string | null = null;
     let disposed = false;
@@ -129,7 +134,12 @@ export default function ReaderPage({
     let pauses = 0;
     let paused = false;
     let lastAct = Date.now();
+    let blurred = !document.hasFocus();
+    let awaySince: number | null = null;
+    let nextNudgeAt = 0;
     const IDLE_MS = 60 * 1000;
+    const AWAY_GRACE_MS = 30 * 1000; // 顺手切走查个词不打扰,离开超过这个才提醒
+    const NUDGE_EVERY_MS = 10 * 60 * 1000;
 
     api
       .post<{ id: string }>("/api/reading-sessions", { book_id: bookId })
@@ -147,41 +157,98 @@ export default function ReaderPage({
     };
     const events = ["mousemove", "mousedown", "keydown", "scroll", "wheel", "touchstart"];
     events.forEach((e) => window.addEventListener(e, onAct, { passive: true }));
+    const onBlur = () => {
+      blurred = true;
+    };
+    const onFocus = () => {
+      blurred = false;
+      onAct(); // 刚回到页面,别立刻又判成无操作
+    };
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
 
-    const tick = window.setInterval(() => {
-      if (document.hidden) return; // 切走标签页不计时
-      if (Date.now() - lastAct > IDLE_MS) {
-        if (!paused) {
-          paused = true;
-          pauses += 1;
-        }
-        idle += 1000;
-      } else {
-        active += 1000;
-      }
-      setTimer({ ms: active, paused });
-    }, 1000);
-
-    const save = (keepalive: boolean) => {
-      if (!sessionId) return;
-      void fetch(`/api/reading-sessions/${sessionId}`, {
+    const save = (keepalive: boolean): Promise<void> => {
+      if (!sessionId) return Promise.resolve();
+      return fetch(`/api/reading-sessions/${sessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active_ms: active, idle_ms: idle, pauses }),
         keepalive,
-      }).catch(() => {});
+      })
+        .then(() => {})
+        .catch(() => {});
     };
-    const hb = window.setInterval(() => save(false), 20000); // 心跳保存,防丢
+
+    // 提醒里的数字要准:先把本次会话落库,再问后端今天一共读了多久
+    const nudgeNow = async () => {
+      await save(false);
+      try {
+        const r = await api.get<ReadingToday>(`/api/reading-today?tzoff=${new Date().getTimezoneOffset()}`);
+        if (!disposed) setNudge({ ...r, at: Date.now() });
+      } catch {
+        /* 拿不到今日时长就跳过这次提醒 */
+      }
+    };
+
+    const tick = window.setInterval(() => {
+      if (!document.hidden) {
+        // 切走标签页不计时
+        if (Date.now() - lastAct > IDLE_MS) {
+          if (!paused) {
+            paused = true;
+            pauses += 1;
+          }
+          idle += 1000;
+        } else {
+          active += 1000;
+        }
+        setTimer({ ms: active, paused });
+      }
+      // 朗读期间每句都会刷新高亮,翻页的空档留足余量
+      const listening = Date.now() - lastTtsRef.current < IDLE_MS;
+      if (listening || (!document.hidden && !blurred && !paused)) {
+        awaySince = null;
+      } else {
+        if (awaySince === null) {
+          awaySince = Date.now();
+          // 已经因无操作暂停(至少 1 分钟没动)的话,不必再等宽限期
+          nextNudgeAt = awaySince + (paused ? 0 : AWAY_GRACE_MS);
+        }
+        if (Date.now() >= nextNudgeAt) {
+          nextNudgeAt = Date.now() + NUDGE_EVERY_MS;
+          void nudgeNow();
+        }
+      }
+    }, 1000);
+
+    const hb = window.setInterval(() => void save(false), 20000); // 心跳保存,防丢
 
     return () => {
       disposed = true;
       clearInterval(tick);
       clearInterval(hb);
       events.forEach((e) => window.removeEventListener(e, onAct));
-      save(true); // 离开时用 keepalive 可靠上报
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+      void save(true); // 离开时用 keepalive 可靠上报
       setTimer({ ms: 0, paused: false });
+      setNudge(null);
     };
   }, [bookId]);
+
+  useEffect(() => {
+    if (ttsHighlight) lastTtsRef.current = Date.now();
+  }, [ttsHighlight]);
+
+  // 提醒没读的时候顺手改标题,人在别的标签页也能看见
+  useEffect(() => {
+    if (!nudge) return;
+    const prev = document.title;
+    document.title = "⏰ Back to reading?";
+    return () => {
+      document.title = prev;
+    };
+  }, [nudge]);
 
   // 章节目录:优先 PDF outline,无则后端启发式兜底
   useEffect(() => {
@@ -584,6 +651,10 @@ export default function ReaderPage({
           onNextPage={() => gotoPage(pageNo + 1)}
           persistent={isMobile}
         />
+      )}
+
+      {nudge && (
+        <FocusNudge key={nudge.at} todayMs={nudge.ms} goalMs={nudge.goal_ms} onDismiss={() => setNudge(null)} />
       )}
 
       {showToc && (
