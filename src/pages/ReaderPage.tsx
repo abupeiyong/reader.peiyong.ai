@@ -180,13 +180,15 @@ export default function ReaderPage({
     };
 
     // 提醒上的是「今天一共读了多久」,不是这一次读了多久:
-    // 后端汇总今天其它会话(排除本次,免得和下面的实时时长重复),再加上本次会话的实时 active
+    // 后端汇总今天其它会话(排除本次,免得和下面的实时时长重复),再加上本次会话的实时 active。
+    // 一次会话整段算在它开始的那天,所以跨过午夜后本次会话已经属于昨天了
+    // (live_counts_today=false),这时不能再把实时时长算进今天,不然和日历/统计对不上。
     const nudgeNow = async () => {
       try {
         const q = new URLSearchParams({ tzoff: String(new Date().getTimezoneOffset()) });
         if (sessionId) q.set("exclude", sessionId);
         const r = await api.get<ReadingToday>(`/api/reading-today?${q}`);
-        if (!disposed) setNudge({ ...r, ms: r.ms + active, at: Date.now() });
+        if (!disposed) setNudge({ ...r, ms: r.ms + (r.live_counts_today ? active : 0), at: Date.now() });
       } catch {
         /* 拿不到今日时长就跳过这次提醒 */
       }
