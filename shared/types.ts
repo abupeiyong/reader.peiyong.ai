@@ -125,4 +125,10 @@ export const DAILY_GOAL_MS = 3 * 60 * 60 * 1000;
 export interface ReadingToday {
   ms: number;       // 今天(用户本地日)已读的 active_ms 总和(带 exclude 时不含被排除的那次会话)
   goal_ms: number;  // 当日目标
+  /**
+   * 被 exclude 的那次会话(通常是正在进行的这次)算不算今天:
+   * 会话整段计入它「开始」的那个本地日,所以跨午夜时它可能属于昨天。
+   * 为 false 时调用方不要把本次的实时时长加到 ms 上,否则提醒会和日历/统计对不上。
+   */
+  live_counts_today: boolean;
 }

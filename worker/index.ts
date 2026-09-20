@@ -30,6 +30,23 @@ app.route("/api/tg", tg);
 const api = new Hono<{ Bindings: Env; Variables: Vars }>();
 api.use("*", requireAuth);
 
+// ---------- 按用户本地日分桶 ----------
+// tzoff:客户端 getTimezoneOffset() 传上来的分钟数(UTC 减本地,东八区是 -480)。
+//
+// 阅读会话的归属口径(/stats、/calendar、/reading-today 三处统一用这一套):
+// 一次会话整段计入它「开始」的那个本地日。reading_sessions 里只有起止时间和 active_ms 总量,
+// 没有逐段时间线,跨午夜的会话没法精确按午夜切开;按开始日归属的好处是写下就不再变,
+// 不会因为会话还在继续而让昨天的统计往回改。
+const DAY_MS = 86400000;
+const tzShift = (tzoff: number) => (Number.isFinite(tzoff) ? tzoff : 0) * 60000;
+/** 时间戳所属的本地日,YYYY-MM-DD */
+const localDayKey = (ts: number, tzoff: number) => new Date(ts - tzShift(tzoff)).toISOString().slice(0, 10);
+/** 时间戳所属本地日的零点(UTC 毫秒) */
+const localDayStart = (ts: number, tzoff: number) =>
+  Math.floor((ts - tzShift(tzoff)) / DAY_MS) * DAY_MS + tzShift(tzoff);
+/** 一次阅读会话计入哪个本地日 */
+const sessionDayKey = (s: { started_at: number }, tzoff: number) => localDayKey(s.started_at, tzoff);
+
 /** 学习活动日志(阅读报告用),失败不影响主流程 */
 function logActivity(env: Env, userId: string, kind: string, bookId?: string | null, pageNo?: number | null) {
   return env.DB.prepare("INSERT INTO activity (user_id, kind, book_id, page_no, created_at) VALUES (?, ?, ?, ?, ?)")
@@ -452,7 +469,7 @@ api.get("/stats", async (c) => {
     .bind(userId, since)
     .all<{ kind: string; created_at: number }>();
 
-  const dayKey = (ts: number) => new Date(ts - (Number.isFinite(tzoff) ? tzoff : 0) * 60000).toISOString().slice(0, 10);
+  const dayKey = (ts: number) => localDayKey(ts, tzoff);
   const days: Record<string, Record<string, number>> = {};
   for (let i = 29; i >= 0; i--) {
     days[dayKey(now() - i * 24 * 3600 * 1000)] = {};
@@ -473,7 +490,7 @@ api.get("/stats", async (c) => {
     else if (i === 0 && !has) continue;
   }
 
-  // 每日阅读时长(近 30 天,active_ms 按本地日聚合)
+  // 每日阅读时长(近 30 天,active_ms 按会话开始的本地日聚合,见 sessionDayKey)
   const { results: sessions } = await c.env.DB.prepare(
     "SELECT started_at, active_ms FROM reading_sessions WHERE user_id = ? AND started_at >= ?"
   )
@@ -482,7 +499,7 @@ api.get("/stats", async (c) => {
   const readMs: Record<string, number> = {};
   for (const k of Object.keys(days)) readMs[k] = 0;
   for (const s of sessions) {
-    const k = dayKey(s.started_at);
+    const k = sessionDayKey(s, tzoff);
     if (k in readMs) readMs[k] += s.active_ms;
   }
 
@@ -1051,16 +1068,26 @@ api.patch("/reading-sessions/:id", async (c) => {
 // 今天(用户本地日)已读总时长 + 当日目标,供阅读页的专注提醒用。
 // exclude=<session id>:排除正在进行的这次会话,调用方自己把还没落库的实时时长加上,
 // 这样卡片上的数字不依赖心跳是否刚好落过库。
+// 会话整段归它开始的那天(见 sessionDayKey),所以跨午夜时本次会话的实时时长可能不属于今天,
+// live_counts_today 告诉前端该不该把它加上 —— 不然提醒和日历/统计会对不上。
 api.get("/reading-today", async (c) => {
-  const raw = Number(c.req.query("tzoff") ?? 0); // 分钟(getTimezoneOffset)
-  const tzoff = Number.isFinite(raw) ? raw : 0;
-  const dayStart = Math.floor((now() - tzoff * 60000) / 86400000) * 86400000 + tzoff * 60000;
+  const userId = c.get("userId");
+  const tzoff = Number(c.req.query("tzoff") ?? 0); // 分钟(getTimezoneOffset)
+  const dayStart = localDayStart(now(), tzoff);
+  const excludeId = c.req.query("exclude") ?? "";
   const row = await c.env.DB.prepare(
     "SELECT COALESCE(SUM(active_ms), 0) AS ms FROM reading_sessions WHERE user_id = ? AND started_at >= ? AND id <> ?"
   )
-    .bind(c.get("userId"), dayStart, c.req.query("exclude") ?? "")
+    .bind(userId, dayStart, excludeId)
     .first<{ ms: number }>();
-  const body: ReadingToday = { ms: row?.ms ?? 0, goal_ms: DAILY_GOAL_MS };
+  let liveCountsToday = true; // 没传 exclude(或那条会话查不到)时维持旧行为:实时时长算今天
+  if (excludeId) {
+    const live = await c.env.DB.prepare("SELECT started_at FROM reading_sessions WHERE id = ? AND user_id = ?")
+      .bind(excludeId, userId)
+      .first<{ started_at: number }>();
+    if (live) liveCountsToday = live.started_at >= dayStart;
+  }
+  const body: ReadingToday = { ms: row?.ms ?? 0, goal_ms: DAILY_GOAL_MS, live_counts_today: liveCountsToday };
   return c.json(body);
 });
 
@@ -1072,7 +1099,7 @@ api.get("/calendar", async (c) => {
   const end = Number(c.req.query("end") ?? now());
   const tzoff = Number(c.req.query("tzoff") ?? 0); // 分钟(getTimezoneOffset)
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return c.json({ error: "bad range" }, 400);
-  const localDay = (ts: number) => new Date(ts - tzoff * 60000).toISOString().slice(0, 10);
+  const localDay = (ts: number) => localDayKey(ts, tzoff);
 
   // 阅读的书(按天去重)
   const { results: reads } = await c.env.DB.prepare(
@@ -1108,7 +1135,8 @@ api.get("/calendar", async (c) => {
     .all<{ book_id: string; book_title: string | null; active_ms: number; pauses: number; started_at: number; ended_at: number | null }>();
 
   const days: Record<string, { read_ms: number; books: { id: string; title: string }[]; words: { word: string; meaning: string; sentence: string | null }[]; notes: { note: string; quote: string | null; page_no: number | null }[]; sessions: { book_id: string; book_title: string | null; started_at: number; ended_at: number | null; active_ms: number; pauses: number }[] }> = {};
-  const dayOf = (ts: number) => (days[localDay(ts)] ??= { read_ms: 0, books: [], words: [], notes: [], sessions: [] });
+  const dayBucket = (key: string) => (days[key] ??= { read_ms: 0, books: [], words: [], notes: [], sessions: [] });
+  const dayOf = (ts: number) => dayBucket(localDay(ts));
 
   for (const r of reads) {
     const d = dayOf(r.created_at);
@@ -1129,7 +1157,8 @@ api.get("/calendar", async (c) => {
     dayOf(n.created_at).notes.push({ note: n.note, quote: n.quote, page_no: n.page_no });
   }
   for (const s of sessions) {
-    const d = dayOf(s.started_at);
+    // 整段归会话开始的那天,和 /stats、/reading-today 一致
+    const d = dayBucket(sessionDayKey(s, tzoff));
     d.read_ms += s.active_ms;
     // 过短的会话(打开即离开)不进明细,只计入总时长
     if (s.active_ms >= 30_000) {
