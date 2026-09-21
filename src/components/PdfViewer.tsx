@@ -48,6 +48,7 @@ export default function PdfViewer({
   const [flash, setFlash] = useState(false);
   const [damaged, setDamaged] = useState(false);
   const [layerVersion, setLayerVersion] = useState(0);
+  const endOfContentRef = useRef<HTMLDivElement | null>(null);
 
   // 渲染页面 canvas + 文本层
   useEffect(() => {
@@ -93,6 +94,11 @@ export default function PdfViewer({
       await tl.render();
       if (cancelled) return;
       wrapWords(textLayer);
+      // 选择兜底层(同 pdf.js TextLayerBuilder):拖选经过词间空白时不让选区跳到别处
+      const end = document.createElement("div");
+      end.className = "endOfContent";
+      textLayer.append(end);
+      endOfContentRef.current = end;
       setLayerVersion((v) => v + 1); // 文本层重建后需要重新贴高亮
       // 检测文本层坐标是否损坏(字体宽度表异常导致大量词飘到页面外)
       const dmg = detectDamage(textLayer, viewport.width);
@@ -123,6 +129,76 @@ export default function PdfViewer({
     if (!sentence) return;
     highlightSentence(layer, sentence);
   }, [ttsHighlight, paragraphs, layerVersion]);
+
+  // 拖选时展开 endOfContent 覆盖整层,并让它紧跟选区端点(Chrome 命中空白时会取它在 DOM 里的位置),
+  // 否则鼠标/长按划过行间或词间空白时,选区会跳到页首/页尾,选中别的内容
+  useEffect(() => {
+    const layer = textLayerRef.current;
+    if (!layer) return;
+    const isFirefox = /Firefox\//.test(navigator.userAgent);
+    let pointerDown = false;
+    let prevRange: Range | null = null;
+    const reset = () => {
+      const end = endOfContentRef.current;
+      if (end) {
+        layer.append(end);
+        end.style.width = "";
+        end.style.height = "";
+      }
+      layer.classList.remove("selecting");
+      prevRange = null;
+    };
+    const onDown = () => layer.classList.add("selecting");
+    const onDocDown = () => {
+      pointerDown = true;
+    };
+    const onUp = () => {
+      pointerDown = false;
+      reset();
+    };
+    const onKeyUp = () => {
+      if (!pointerDown) reset();
+    };
+    const onSelChange = () => {
+      const sel = document.getSelection();
+      if (!sel || sel.rangeCount === 0 || !sel.getRangeAt(0).intersectsNode(layer)) {
+        reset();
+        return;
+      }
+      layer.classList.add("selecting");
+      const end = endOfContentRef.current;
+      if (isFirefox || !end) return;
+      const range = sel.getRangeAt(0);
+      const modifyStart =
+        prevRange &&
+        (range.compareBoundaryPoints(Range.END_TO_END, prevRange) === 0 ||
+          range.compareBoundaryPoints(Range.START_TO_END, prevRange) === 0);
+      let anchor: Node | null = modifyStart ? range.startContainer : range.endContainer;
+      if (anchor?.nodeType === Node.TEXT_NODE) anchor = anchor.parentNode;
+      // 词被 wrapWords 包成 span.w,需上溯到 pdf.js 定位的文本 span,再插到它旁边
+      const textSpan = anchor instanceof HTMLElement ? anchor.closest<HTMLElement>("span:not(.w)") : null;
+      if (textSpan && textSpan !== layer && layer.contains(textSpan) && textSpan.parentElement) {
+        end.style.width = `${layer.clientWidth}px`;
+        end.style.height = `${layer.clientHeight}px`;
+        textSpan.parentElement.insertBefore(end, modifyStart ? textSpan : textSpan.nextSibling);
+      }
+      prevRange = range.cloneRange();
+    };
+    layer.addEventListener("mousedown", onDown);
+    document.addEventListener("pointerdown", onDocDown);
+    document.addEventListener("pointerup", onUp);
+    window.addEventListener("blur", onUp);
+    document.addEventListener("keyup", onKeyUp);
+    document.addEventListener("selectionchange", onSelChange);
+    return () => {
+      layer.removeEventListener("mousedown", onDown);
+      document.removeEventListener("pointerdown", onDocDown);
+      document.removeEventListener("pointerup", onUp);
+      window.removeEventListener("blur", onUp);
+      document.removeEventListener("keyup", onKeyUp);
+      document.removeEventListener("selectionchange", onSelChange);
+    };
+  }, []);
 
   // 引用跳转闪烁
   useEffect(() => {
