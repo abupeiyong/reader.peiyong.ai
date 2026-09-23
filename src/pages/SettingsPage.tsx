@@ -4,7 +4,7 @@
 // key 保存后不再回显明文,只显示末 4 位;留空保存 = 清除,回退部署时配置的 secret。
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { AiProviderTest, AiSettings } from "../../shared/types";
+import type { AiProviderInfo, AiProviderTest, AiSettings } from "../../shared/types";
 import { Icon } from "../components/Icon";
 
 export default function SettingsPage() {
@@ -131,29 +131,35 @@ export default function SettingsPage() {
               </div>
 
               {isRandom && (
-                <p className="hint-text">
-                  Each lookup, page analysis and chat draws one provider, each keeping the model you picked for it. In
-                  the draw: {inDraw.map((p) => `${p.label} (${p.model})`).join(" · ") || "nobody — no API key yet"}.
-                </p>
+                <>
+                  <p className="hint-text">
+                    Each lookup, page analysis and chat draws one provider from the ones with a key, each keeping the
+                    model you pick for it here.
+                  </p>
+                  {/* 每家一个下拉:random 下也能直接改某家的模型,不用先切过去再切回来 */}
+                  {inDraw.map((p) => (
+                    <label key={p.id} className="tg-row">
+                      <span>{p.label} model</span>
+                      <ModelSelect
+                        provider={p}
+                        value={p.model}
+                        disabled={busy}
+                        onPick={(m) => save({ [`${p.id}_model`]: m }, `${p.label} model saved`)}
+                      />
+                    </label>
+                  ))}
+                </>
               )}
 
               {!isRandom && active && (
                 <label className="tg-row">
                   <span>Model</span>
-                  <select
+                  <ModelSelect
+                    provider={active}
                     value={settings.model}
                     disabled={busy}
-                    onChange={(e) => save({ model: e.target.value }, "Model saved")}
-                  >
-                    {(active.models.includes(settings.model) ? active.models : [settings.model, ...active.models]).map(
-                      (m) => (
-                        <option key={m} value={m}>
-                          {m}
-                          {m === active.default_model ? " (default)" : ""}
-                        </option>
-                      )
-                    )}
-                  </select>
+                    onPick={(m) => save({ model: m }, "Model saved")}
+                  />
                 </label>
               )}
 
@@ -255,6 +261,31 @@ export default function SettingsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+/** 某一家的模型下拉;当前值不在清单里(比如提供商下线了它)时也照样列出来,免得下拉显示空白 */
+function ModelSelect({
+  provider,
+  value,
+  disabled,
+  onPick,
+}: {
+  provider: AiProviderInfo;
+  value: string;
+  disabled: boolean;
+  onPick: (model: string) => void;
+}) {
+  const models = provider.models.includes(value) ? provider.models : [value, ...provider.models];
+  return (
+    <select value={value} disabled={disabled} onChange={(e) => onPick(e.target.value)}>
+      {models.map((m) => (
+        <option key={m} value={m}>
+          {m}
+          {m === provider.default_model ? " (default)" : ""}
+        </option>
+      ))}
+    </select>
   );
 }
 
