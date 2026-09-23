@@ -11,11 +11,12 @@ import { generateCover } from "./cover";
 import {
   PROVIDERS,
   PROVIDER_IDS,
+  RANDOM_PROVIDER,
+  activeChoice,
   activeModel,
-  activeProvider,
   envKey,
   envModel,
-  isProviderId,
+  isProviderChoice,
   loadAiSettings,
   providerModels,
   userKey,
@@ -574,12 +575,13 @@ function keyHint(key: string): string {
 
 api.get("/ai/settings", async (c) => {
   const row = await loadAiSettings(c.env, c.get("userId"));
-  const provider = activeProvider(row);
+  const provider = activeChoice(row);
   // 模型清单可能要问提供商的 /models(DeepSeek),几家并行问
   const models = await Promise.all(PROVIDER_IDS.map((id) => providerModels(c.env, row, id)));
   const body: AiSettings = {
     provider,
-    model: activeModel(c.env, row, provider),
+    // random 没有「当前模型」:每家各用自己的 default_model
+    model: provider === RANDOM_PROVIDER ? "" : activeModel(c.env, row, provider),
     providers: PROVIDER_IDS.map((id, i) => {
       const fromUser = userKey(row, id);
       const fromEnv = envKey(c.env, id);
@@ -608,12 +610,18 @@ api.post("/ai/settings", async (c) => {
     deepseek_api_key?: string;
   }>();
   const row = await loadAiSettings(c.env, userId);
-  const target = isProviderId(body.provider) ? body.provider : activeProvider(row);
-  if (body.provider !== undefined && !isProviderId(body.provider)) {
+  if (body.provider !== undefined && !isProviderChoice(body.provider)) {
     return c.json({ error: "未知的 provider" }, 400);
   }
-  if (body.model !== undefined && !(await providerModels(c.env, row, target)).includes(body.model)) {
-    return c.json({ error: `${PROVIDERS[target].label} 不支持模型 ${body.model}` }, 400);
+  const current = activeChoice(row);
+  const target = isProviderChoice(body.provider) ? body.provider : current;
+  if (body.model !== undefined) {
+    if (target === RANDOM_PROVIDER) {
+      return c.json({ error: "随机模式下各家用自己的默认模型,不能指定模型" }, 400);
+    }
+    if (!(await providerModels(c.env, row, target)).includes(body.model)) {
+      return c.json({ error: `${PROVIDERS[target].label} 不支持模型 ${body.model}` }, 400);
+    }
   }
 
   const sets: string[] = [];
@@ -621,8 +629,8 @@ api.post("/ai/settings", async (c) => {
   if (body.provider !== undefined) {
     sets.push("ai_provider = ?");
     vals.push(target);
-    // 换提供商时清掉旧模型,避免把上一家的模型名带过去
-    if (body.model === undefined && target !== activeProvider(row)) {
+    // 换提供商时清掉旧模型,避免把上一家的模型名带过去(切到 random 同理:回到各家默认)
+    if (body.model === undefined && target !== current) {
       sets.push("ai_model = ?");
       vals.push(null);
     }

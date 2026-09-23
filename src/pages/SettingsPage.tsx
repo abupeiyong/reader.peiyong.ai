@@ -1,4 +1,5 @@
-// 设置页:选 AI 提供商(OpenAI / DeepSeek)、模型,并填各家的 API key。
+// 设置页:选 AI 提供商(OpenAI / DeepSeek / Random)、模型,并填各家的 API key。
+// Random = 每次 AI 任务在「填了 key 的提供商」里随机挑一家,各家用自己的默认模型。
 // key 保存后不再回显明文,只显示末 4 位;留空保存 = 清除,回退部署时配置的 secret。
 import { useEffect, useState } from "react";
 import { api } from "../api";
@@ -39,7 +40,10 @@ export default function SettingsPage() {
     }
   };
 
+  const isRandom = settings?.provider === "random";
   const active = settings?.providers.find((p) => p.id === settings.provider);
+  // 随机挑选只在有 key 的提供商里进行,没 key 的那家永远抽不到
+  const inDraw = settings?.providers.filter((p) => p.key_set) ?? [];
 
   return (
     <div className="library">
@@ -81,8 +85,8 @@ export default function SettingsPage() {
                 <b>AI provider</b>
               </div>
               <p className="tg-desc">
-                Which model answers lookups, page analysis and chat. Without a key the app falls back to Workers AI,
-                then to offline mock replies.
+                Which model answers lookups, page analysis and chat. Pick a provider, or let Random draw one for each
+                request. Without a key the app falls back to Workers AI, then to offline mock replies.
               </p>
 
               <div className="settings-providers">
@@ -99,9 +103,24 @@ export default function SettingsPage() {
                     </span>
                   </button>
                 ))}
+                <button
+                  className={`provider-pick ${isRandom ? "active" : ""}`}
+                  disabled={busy}
+                  onClick={() => save({ provider: "random" }, "Switched to Random")}
+                >
+                  <span className="provider-name">Random</span>
+                  <span className="provider-key">One provider per request</span>
+                </button>
               </div>
 
-              {active && (
+              {isRandom && (
+                <p className="hint-text">
+                  Each lookup, page analysis and chat draws one provider, each using its default model. In the draw:{" "}
+                  {inDraw.map((p) => `${p.label} (${p.default_model})`).join(" · ") || "nobody — no API key yet"}.
+                </p>
+              )}
+
+              {!isRandom && active && (
                 <label className="tg-row">
                   <span>Model</span>
                   <select
@@ -121,9 +140,17 @@ export default function SettingsPage() {
                 </label>
               )}
 
-              {active && !active.key_set && (
+              {!isRandom && active && !active.key_set && (
                 <div className="settings-warn">
                   {active.label} has no API key yet — add one below, otherwise AI features stay on the fallback model.
+                </div>
+              )}
+
+              {isRandom && inDraw.length < 2 && (
+                <div className="settings-warn">
+                  {inDraw.length === 1
+                    ? `Only ${inDraw[0].label} has an API key, so every request goes there. Add the other key below to make the draw a real coin flip.`
+                    : "No provider has an API key yet — add one below, otherwise AI features stay on the fallback model."}
                 </div>
               )}
             </section>
