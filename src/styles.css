@@ -751,6 +751,11 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .settings-key-input input {
   flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff;
 }
+.settings-test {
+  margin: 6px 0 0; font-size: 12.5px; display: flex; align-items: flex-start; gap: 5px; line-height: 1.5;
+}
+.settings-test.ok { color: var(--good); }
+.settings-test.bad { color: var(--danger); word-break: break-word; }
 
 .ai-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ai-table th {

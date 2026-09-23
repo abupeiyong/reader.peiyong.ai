@@ -8,6 +8,7 @@ import { estimateVocabRank, hintsForText, applyReview, priorRank, type ReviewGra
 import { wordRank } from "./wordfreq";
 import { telegramEnabled, handleUpdate, runDailyPush } from "./telegram";
 import { generateCover } from "./cover";
+import { openaiProbe } from "./openai";
 import {
   PROVIDERS,
   PROVIDER_IDS,
@@ -17,7 +18,9 @@ import {
   envKey,
   envModel,
   isProviderChoice,
+  isProviderId,
   loadAiSettings,
+  providerConfig,
   providerModels,
   userKey,
   withAiSchema,
@@ -27,6 +30,7 @@ import {
   type AiCallKind,
   type AiCallLog,
   type AiLatencyGroup,
+  type AiProviderTest,
   type AiSettings,
   type AiStats,
   type ChatScope,
@@ -652,6 +656,37 @@ api.post("/ai/settings", async (c) => {
     );
   }
   return c.json({ ok: true });
+});
+
+// 连接自检:用这家当前生效的 key/模型真发一条最短请求,把失败原因原样带回页面。
+// 平时调用失败会静默回退 Workers AI → mock,原因只留在 Worker 日志里,
+// 页面上只能看到「AI 好像没用我选的这家」,查不出到底是 key 错了还是余额不足。
+api.post("/ai/test", async (c) => {
+  const body = await c.req.json<{ provider?: string }>().catch(() => ({}) as { provider?: string });
+  if (!isProviderId(body.provider)) return c.json({ error: "未知的 provider" }, 400);
+  const provider = body.provider;
+  const row = await loadAiSettings(c.env, c.get("userId"));
+  const cfg = providerConfig(c.env, row, provider);
+  if (!cfg) {
+    const noKey: AiProviderTest = {
+      provider,
+      model: envModel(c.env, provider),
+      ok: false,
+      latency_ms: 0,
+      error: `${PROVIDERS[provider].label} 还没有 API key(设置页填一个,或部署时配 secret)`,
+    };
+    return c.json(noKey);
+  }
+  const t0 = Date.now();
+  const error = await openaiProbe(cfg);
+  const result: AiProviderTest = {
+    provider: cfg.provider,
+    model: cfg.model,
+    ok: error === null,
+    latency_ms: Date.now() - t0,
+    error,
+  };
+  return c.json(result);
 });
 
 // ---------- AI 调用延迟统计(提供商对比)----------

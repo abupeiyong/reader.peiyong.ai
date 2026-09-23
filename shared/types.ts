@@ -139,6 +139,15 @@ export interface AiProviderInfo {
   key_hint: string;                  // 末 4 位(如 "…3f9a");没有 key 时为空串
 }
 
+/** 设置页「自检」的结果:ok=false 时 error 是提供商返回的原话(HTTP 状态 + 它的 message) */
+export interface AiProviderTest {
+  provider: AiProviderId;
+  model: string;
+  ok: boolean;
+  latency_ms: number;
+  error: string | null;
+}
+
 export interface AiSettings {
   provider: AiProviderChoice;
   model: string;        // 当前生效的模型;random 时为空串(各家各用自己的默认模型)
