@@ -18,6 +18,7 @@ import {
   isProviderId,
   loadAiSettings,
   userKey,
+  withAiSchema,
 } from "./aiprovider";
 import {
   DAILY_GOAL_MS,
@@ -635,7 +636,9 @@ api.post("/ai/settings", async (c) => {
   }
   if (sets.length) {
     vals.push(userId);
-    await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+    await withAiSchema(c.env, () =>
+      c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run()
+    );
   }
   return c.json({ ok: true });
 });
@@ -660,12 +663,14 @@ function summarize(rows: { latency_ms: number; ok: number; created_at: number }[
 api.get("/ai/stats", async (c) => {
   const days = Math.min(365, Math.max(1, Number(c.req.query("days") ?? 30) || 30));
   // 行数不多(一次调用一行),直接取回来在 JS 里算分位数:SQLite 没有 percentile 函数
-  const { results } = await c.env.DB.prepare(
-    `SELECT provider, model, kind, latency_ms, ok, stream, created_at FROM ai_calls
-     WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 5000`
-  )
-    .bind(c.get("userId"), now() - days * 24 * 3600 * 1000)
-    .all<AiCallLog>();
+  const { results } = await withAiSchema(c.env, () =>
+    c.env.DB.prepare(
+      `SELECT provider, model, kind, latency_ms, ok, stream, created_at FROM ai_calls
+       WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 5000`
+    )
+      .bind(c.get("userId"), now() - days * 24 * 3600 * 1000)
+      .all<AiCallLog>()
+  );
 
   const group = (keyOf: (r: AiCallLog) => string) => {
     const buckets = new Map<string, AiCallLog[]>();

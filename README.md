@@ -53,6 +53,7 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 ## 开发 / 部署
 - 本地:`npm run dev`(用 `wrangler.dev.jsonc`,无 AI 绑定 → 离线 mock)
 - 部署:`npm run deploy`;迁移 0001–0011(`npm run db:migrate:remote`)
+  —— 0011 漏跑时 AI 设置/统计接口会在首次报「列/表不存在」时自行补建,不至于整页打不开
 - Secret:`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`(可选,也可在设置页填)、`ELEVENLABS_API_KEY`、`TELEGRAM_BOT_TOKEN`、
   `TELEGRAM_WEBHOOK_SECRET`、`TELEGRAM_OWNER_CHAT_ID`(可选,限定唯一可登录的 chat)
 - 本地开发(`APP_ENV != production`)保留邮箱直登,供 e2e 用;生产环境自动禁用

@@ -51,12 +51,59 @@ export interface AiSettingsRow {
   deepseek_api_key: string | null;
 }
 
+// 迁移 0011 的兜底:部署了新代码但 `npm run db:migrate:remote` 没跑到时,
+// 这些列/表不存在,设置页和统计页会直接 500(前端只剩一个转不完的 Loading)。
+// 下面的语句只在查询报「列/表不存在」时执行一次,已迁移过的库上永远不会触发。
+const AI_SCHEMA_SQL = [
+  "ALTER TABLE users ADD COLUMN ai_provider TEXT",
+  "ALTER TABLE users ADD COLUMN ai_model TEXT",
+  "ALTER TABLE users ADD COLUMN openai_api_key TEXT",
+  "ALTER TABLE users ADD COLUMN deepseek_api_key TEXT",
+  `CREATE TABLE IF NOT EXISTS ai_calls (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+     provider TEXT NOT NULL,
+     model TEXT NOT NULL,
+     kind TEXT NOT NULL,
+     latency_ms INTEGER NOT NULL,
+     ok INTEGER NOT NULL DEFAULT 1,
+     stream INTEGER NOT NULL DEFAULT 0,
+     created_at INTEGER NOT NULL
+   )`,
+  "CREATE INDEX IF NOT EXISTS idx_ai_calls_user ON ai_calls(user_id, created_at)",
+];
+
+function schemaMissing(e: unknown): boolean {
+  const err = e as { message?: string; cause?: { message?: string } };
+  return /no such (column|table)/i.test(`${err?.message ?? ""} ${err?.cause?.message ?? ""}`);
+}
+
+async function ensureAiSchema(env: Env): Promise<void> {
+  for (const sql of AI_SCHEMA_SQL) {
+    // 已经有的列会报 duplicate column name(ALTER 没有 IF NOT EXISTS),忽略即可
+    await env.DB.prepare(sql)
+      .run()
+      .catch((e) => console.warn("ai schema 兜底:", (e as Error).message));
+  }
+}
+
+/** 跑一条依赖迁移 0011 的语句;库上还缺这些列/表时补一次再重试 */
+export async function withAiSchema<T>(env: Env, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (e) {
+    if (!schemaMissing(e)) throw e;
+    await ensureAiSchema(env);
+    return run();
+  }
+}
+
 export function loadAiSettings(env: Env, userId: string): Promise<AiSettingsRow | null> {
-  return env.DB.prepare(
-    "SELECT ai_provider, ai_model, openai_api_key, deepseek_api_key FROM users WHERE id = ?"
-  )
-    .bind(userId)
-    .first<AiSettingsRow>();
+  return withAiSchema(env, () =>
+    env.DB.prepare("SELECT ai_provider, ai_model, openai_api_key, deepseek_api_key FROM users WHERE id = ?")
+      .bind(userId)
+      .first<AiSettingsRow>()
+  );
 }
 
 export function userKey(row: AiSettingsRow | null, p: AiProviderId): string {
@@ -114,19 +161,20 @@ export function logAiCall(
     stream?: boolean;
   }
 ) {
-  return env.DB.prepare(
-    "INSERT INTO ai_calls (user_id, provider, model, kind, latency_ms, ok, stream, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-  )
-    .bind(
-      row.userId,
-      row.provider,
-      row.model,
-      row.kind,
-      Math.max(0, Math.round(row.latencyMs)),
-      row.ok ? 1 : 0,
-      row.stream ? 1 : 0,
-      now()
+  return withAiSchema(env, () =>
+    env.DB.prepare(
+      "INSERT INTO ai_calls (user_id, provider, model, kind, latency_ms, ok, stream, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     )
-    .run()
-    .catch((e) => console.warn("ai_calls 记录失败:", (e as Error).message));
+      .bind(
+        row.userId,
+        row.provider,
+        row.model,
+        row.kind,
+        Math.max(0, Math.round(row.latencyMs)),
+        row.ok ? 1 : 0,
+        row.stream ? 1 : 0,
+        now()
+      )
+      .run()
+  ).catch((e) => console.warn("ai_calls 记录失败:", (e as Error).message));
 }

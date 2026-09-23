@@ -12,11 +12,13 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState("");
   const [err, setErr] = useState("");
 
-  const load = () =>
-    api
+  const load = () => {
+    setErr("");
+    return api
       .get<AiSettings>("/api/ai/settings")
       .then(setSettings)
-      .catch((e) => setErr((e as Error).message));
+      .catch((e) => setErr((e as Error).message || "加载设置失败"));
+  };
 
   useEffect(() => {
     void load();
@@ -58,8 +60,18 @@ export default function SettingsPage() {
           {saved && <span className="settings-saved"><Icon name="check" /> {saved}</span>}
         </div>
 
-        {err && <div className="error-text">{err}</div>}
-        {!settings && <div className="hint-text">Loading…</div>}
+        {err && (
+          <div className="error-text">
+            {err}{" "}
+            {!settings && (
+              <button className="btn btn-ghost" disabled={busy} onClick={() => void load()}>
+                Retry
+              </button>
+            )}
+          </div>
+        )}
+        {/* 加载失败时不要继续显示 Loading:否则页面看上去永远在转 */}
+        {!settings && !err && <div className="hint-text">Loading…</div>}
 
         {settings && (
           <>
