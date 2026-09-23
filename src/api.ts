@@ -11,14 +11,17 @@ export class ApiError extends Error {
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   if (!res.ok) {
-    let msg = res.statusText;
+    // 未被接住的服务端异常走 Hono 默认处理,返回纯文本 "Internal Server Error",
+    // 而 statusText 在 Workers 的响应里是空串 —— 直接拿它当消息会得到空错误,
+    // 页面既不报错也不结束加载。所以依次退到响应正文、statusText、状态码。
+    const body = (await res.text().catch(() => "")).trim();
+    let msg = "";
     try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
+      msg = (JSON.parse(body) as { error?: string }).error ?? "";
     } catch {
-      /* ignore */
+      msg = body.slice(0, 200);
     }
-    throw new ApiError(res.status, msg);
+    throw new ApiError(res.status, msg || res.statusText || `请求失败 (${res.status})`);
   }
   return (await res.json()) as T;
 }
