@@ -20,7 +20,7 @@
   (存在账号上,不回显明文;留空保存 = 清除并回退部署时的 secret)
   —— DeepSeek 的可选模型取自它 `/models` 接口的实时清单(缓存 10 分钟,问不到时用内置清单)
 - 也可以选 Random:每次 AI 任务(查词 / 本页解析 / 对话)在填了 key 的提供商里随机挑一家,
-  各家用自己的默认模型;抽到谁都会记进 AI 统计页,可直接对比两家
+  各家用自己那份已选模型(模型是按提供商分别记的,换来换去不会丢);抽到谁都会记进 AI 统计页,可直接对比两家
 - 每家 key 旁的 `Test` 按钮做连接自检:真发一条最短请求,把提供商返回的 HTTP 状态与
   错误原文显示出来(平时调用失败会静默回退 Workers AI → mock,看不出到底哪里不对);
   提供商返回 200 但内容为空(DeepSeek 的 JSON 模式偶发)同样算失败,照常回退并记为失败调用
@@ -60,8 +60,8 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 
 ## 开发 / 部署
 - 本地:`npm run dev`(用 `wrangler.dev.jsonc`,无 AI 绑定 → 离线 mock)
-- 部署:`npm run deploy`;迁移 0001–0012(`npm run db:migrate:remote`)
-  —— 0011 / 0012 漏跑时 AI 设置/统计接口会在首次报「列/表不存在」时自行补建,不至于整页打不开
+- 部署:`npm run deploy`;迁移 0001–0013(`npm run db:migrate:remote`)
+  —— 0011 / 0012 / 0013 漏跑时 AI 设置/统计接口会在首次报「列/表不存在」时自行补建,不至于整页打不开
 - Secret:`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`(可选,也可在设置页填)、`ELEVENLABS_API_KEY`、`TELEGRAM_BOT_TOKEN`、
   `TELEGRAM_WEBHOOK_SECRET`、`TELEGRAM_OWNER_CHAT_ID`(可选,限定唯一可登录的 chat)
 - 本地开发(`APP_ENV != production`)保留邮箱直登,供 e2e 用;生产环境自动禁用
@@ -75,6 +75,6 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 worker/    Hono API + auth.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / telegram.ts / vocabmodel.ts
 src/       React 前端(pages/ 页面,components/ 组件,lib/ PDF·TTS·录音·TOC)
 shared/    前后端共享类型
-migrations/ D1 迁移(0001 MVP … 0012 查词思考开关)
+migrations/ D1 迁移(0001 MVP … 0013 每家各存一个已选模型)
 scripts/   Playwright 端到端自测(scripts/e2e.mjs)
 ```

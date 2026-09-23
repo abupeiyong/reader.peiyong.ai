@@ -1,6 +1,6 @@
 // 设置页:选 AI 提供商(OpenAI / DeepSeek / Random)、模型,填各家的 API key,
 // 以及查词时要不要让模型「思考」(默认关,查词图的是快)。
-// Random = 每次 AI 任务在「填了 key 的提供商」里随机挑一家,各家用自己的默认模型。
+// Random = 每次 AI 任务在「填了 key 的提供商」里随机挑一家,各家用自己那份已选模型。
 // key 保存后不再回显明文,只显示末 4 位;留空保存 = 清除,回退部署时配置的 secret。
 import { useEffect, useState } from "react";
 import { api } from "../api";
@@ -132,8 +132,8 @@ export default function SettingsPage() {
 
               {isRandom && (
                 <p className="hint-text">
-                  Each lookup, page analysis and chat draws one provider, each using its default model. In the draw:{" "}
-                  {inDraw.map((p) => `${p.label} (${p.default_model})`).join(" · ") || "nobody — no API key yet"}.
+                  Each lookup, page analysis and chat draws one provider, each keeping the model you picked for it. In
+                  the draw: {inDraw.map((p) => `${p.label} (${p.model})`).join(" · ") || "nobody — no API key yet"}.
                 </p>
               )}
 
