@@ -123,3 +123,28 @@ function parseOpenAISSE(input: ReadableStream<Uint8Array>): ReadableStream<strin
     },
   });
 }
+
+/**
+ * OpenAI 兼容的 GET /models:拿提供商当前真实支持的模型列表(设置页的下拉用)。
+ * 失败返回 null,由上层回退到内置清单。
+ */
+export async function openaiListModels(
+  cfg: Pick<ProviderConfig, "provider" | "apiKey" | "baseUrl">
+): Promise<string[] | null> {
+  try {
+    const res = await fetch(`${cfg.baseUrl.replace(/\/$/, "")}/models`, {
+      headers: { Authorization: `Bearer ${cfg.apiKey}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      console.warn(`${cfg.provider} models 失败:`, res.status, (await res.text()).slice(0, 300));
+      return null;
+    }
+    const data = (await res.json()) as { data?: { id?: string }[] };
+    const ids = (data.data ?? []).map((m) => (m.id ?? "").trim()).filter(Boolean);
+    return ids.length ? ids : null;
+  } catch (e) {
+    console.warn(`${cfg.provider} models 异常:`, (e as Error).message);
+    return null;
+  }
+}

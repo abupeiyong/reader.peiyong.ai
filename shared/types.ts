@@ -129,7 +129,7 @@ export type AiCallKind = "explain_word" | "analyze_page" | "chat" | "telegram";
 export interface AiProviderInfo {
   id: AiProviderId;
   label: string;
-  models: string[];
+  models: string[];   // 可选模型;DeepSeek 取自它 /models 的实时清单,问不到时为内置清单
   default_model: string;
   key_set: boolean;
   key_source: "user" | "env" | null; // user = 设置页填的;env = 部署时的 secret

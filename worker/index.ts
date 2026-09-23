@@ -17,6 +17,7 @@ import {
   envModel,
   isProviderId,
   loadAiSettings,
+  providerModels,
   userKey,
   withAiSchema,
 } from "./aiprovider";
@@ -574,17 +575,19 @@ function keyHint(key: string): string {
 api.get("/ai/settings", async (c) => {
   const row = await loadAiSettings(c.env, c.get("userId"));
   const provider = activeProvider(row);
+  // 模型清单可能要问提供商的 /models(DeepSeek),几家并行问
+  const models = await Promise.all(PROVIDER_IDS.map((id) => providerModels(c.env, row, id)));
   const body: AiSettings = {
     provider,
     model: activeModel(c.env, row, provider),
-    providers: PROVIDER_IDS.map((id) => {
+    providers: PROVIDER_IDS.map((id, i) => {
       const fromUser = userKey(row, id);
       const fromEnv = envKey(c.env, id);
       const key = fromUser || fromEnv;
       return {
         id,
         label: PROVIDERS[id].label,
-        models: PROVIDERS[id].models,
+        models: models[i],
         default_model: envModel(c.env, id),
         key_set: Boolean(key),
         key_source: fromUser ? "user" : fromEnv ? "env" : null,
@@ -609,7 +612,7 @@ api.post("/ai/settings", async (c) => {
   if (body.provider !== undefined && !isProviderId(body.provider)) {
     return c.json({ error: "未知的 provider" }, 400);
   }
-  if (body.model !== undefined && !PROVIDERS[target].models.includes(body.model)) {
+  if (body.model !== undefined && !(await providerModels(c.env, row, target)).includes(body.model)) {
     return c.json({ error: `${PROVIDERS[target].label} 不支持模型 ${body.model}` }, 400);
   }
 
