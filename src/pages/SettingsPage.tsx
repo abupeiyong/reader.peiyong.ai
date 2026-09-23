@@ -1,4 +1,5 @@
-// 设置页:选 AI 提供商(OpenAI / DeepSeek / Random)、模型,并填各家的 API key。
+// 设置页:选 AI 提供商(OpenAI / DeepSeek / Random)、模型,填各家的 API key,
+// 以及查词时要不要让模型「思考」(默认关,查词图的是快)。
 // Random = 每次 AI 任务在「填了 key 的提供商」里随机挑一家,各家用自己的默认模型。
 // key 保存后不再回显明文,只显示末 4 位;留空保存 = 清除,回退部署时配置的 secret。
 import { useEffect, useState } from "react";
@@ -27,7 +28,7 @@ export default function SettingsPage() {
     void load();
   }, []);
 
-  const save = async (patch: Record<string, string>, note: string) => {
+  const save = async (patch: Record<string, string | boolean>, note: string) => {
     setErr("");
     setBusy(true);
     try {
@@ -222,6 +223,33 @@ export default function SettingsPage() {
                   {tests[p.id] && tests[p.id] !== "busy" && <TestResult result={tests[p.id] as AiProviderTest} />}
                 </div>
               ))}
+            </section>
+
+            <section className="settings-card">
+              <div className="tg-head">
+                <Icon name="sparkles" size={18} />
+                <b>Word lookups</b>
+              </div>
+              <p className="tg-desc">
+                Looking up a word skips the model's thinking step by default, so the popover comes back as fast as the
+                model can write. Turn it on to trade that speed for a reasoning pass: gpt-5 models switch to low
+                reasoning effort, and DeepSeek keeps deepseek-reasoner instead of falling back to deepseek-chat. Page
+                analysis and chat are not affected.
+              </p>
+              <label className="tg-row">
+                <input
+                  type="checkbox"
+                  checked={settings.word_thinking}
+                  disabled={busy}
+                  onChange={(e) =>
+                    save(
+                      { word_thinking: e.target.checked },
+                      e.target.checked ? "Thinking on for lookups" : "Thinking off for lookups"
+                    )
+                  }
+                />
+                <span>Let the model think before explaining a word</span>
+              </label>
             </section>
           </>
         )}

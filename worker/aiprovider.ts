@@ -56,6 +56,11 @@ export interface ProviderConfig {
   model: string;
   apiKey: string;
   baseUrl: string;
+  /**
+   * 这次调用是否允许模型先「思考」(推理)。
+   * undefined = 沿用各场景原有的默认(最低推理档),只有查词会显式给值。
+   */
+  thinking?: boolean;
 }
 
 /** users 表里与 AI 提供商相关的几列 */
@@ -64,9 +69,10 @@ export interface AiSettingsRow {
   ai_model: string | null;
   openai_api_key: string | null;
   deepseek_api_key: string | null;
+  ai_word_thinking: number | null;
 }
 
-// 迁移 0011 的兜底:部署了新代码但 `npm run db:migrate:remote` 没跑到时,
+// 迁移 0011 / 0012 的兜底:部署了新代码但 `npm run db:migrate:remote` 没跑到时,
 // 这些列/表不存在,设置页和统计页会直接 500(前端只剩一个转不完的 Loading)。
 // 下面的语句只在查询报「列/表不存在」时执行一次,已迁移过的库上永远不会触发。
 const AI_SCHEMA_SQL = [
@@ -74,6 +80,7 @@ const AI_SCHEMA_SQL = [
   "ALTER TABLE users ADD COLUMN ai_model TEXT",
   "ALTER TABLE users ADD COLUMN openai_api_key TEXT",
   "ALTER TABLE users ADD COLUMN deepseek_api_key TEXT",
+  "ALTER TABLE users ADD COLUMN ai_word_thinking INTEGER",
   `CREATE TABLE IF NOT EXISTS ai_calls (
      id INTEGER PRIMARY KEY AUTOINCREMENT,
      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
@@ -115,7 +122,9 @@ export async function withAiSchema<T>(env: Env, run: () => Promise<T>): Promise<
 
 export function loadAiSettings(env: Env, userId: string): Promise<AiSettingsRow | null> {
   return withAiSchema(env, () =>
-    env.DB.prepare("SELECT ai_provider, ai_model, openai_api_key, deepseek_api_key FROM users WHERE id = ?")
+    env.DB.prepare(
+      "SELECT ai_provider, ai_model, openai_api_key, deepseek_api_key, ai_word_thinking FROM users WHERE id = ?"
+    )
       .bind(userId)
       .first<AiSettingsRow>()
   );
@@ -207,14 +216,45 @@ function randomConfig(env: Env, row: AiSettingsRow | null): ProviderConfig | nul
   return usable[Math.floor(Math.random() * usable.length)];
 }
 
+/** 查词默认不让模型思考:查词看的是「多久出结果」,推理那几秒的代价远大于收益 */
+export const DEFAULT_WORD_THINKING = false;
+
+/** 设置页的「查词时让模型思考」开关;没设过(NULL)按默认算 */
+export function wordThinking(row: AiSettingsRow | null): boolean {
+  return row?.ai_word_thinking == null ? DEFAULT_WORD_THINKING : row.ai_word_thinking === 1;
+}
+
+/** 关思考时需要换模型的提供商:DeepSeek 的推理模型没有开关参数,只能换成非推理的那个 */
+const NON_THINKING_SWAP: Partial<Record<AiProviderId, { thinks: RegExp; model: string }>> = {
+  deepseek: { thinks: /^deepseek-reasoner/i, model: "deepseek-chat" },
+};
+
+/**
+ * 把「这次让不让模型思考」落到具体配置上:
+ * - OpenAI(gpt-5 系列)靠 reasoning_effort 调档,模型不变(见 openai.ts 的 chatBody);
+ * - DeepSeek 没有这种参数,只能把 deepseek-reasoner 换成 deepseek-chat。
+ * thinking 为 undefined(查词以外的场景)时不做任何改动。
+ */
+export function applyThinking(cfg: ProviderConfig, thinking: boolean | undefined): ProviderConfig {
+  const swap = NON_THINKING_SWAP[cfg.provider];
+  const model = thinking === false && swap?.thinks.test(cfg.model) ? swap.model : cfg.model;
+  return { ...cfg, model, thinking };
+}
+
 /**
  * 该用户这次调用该用哪家/哪个模型/哪把 key;没有可用 key 返回 null。
  * 每次 AI 任务(查词 / 本页解析 / 对话)都会各调一次,所以 random 是按任务随机,不是按会话。
+ * 传了 kind 时顺带决定这次要不要思考:目前只有查词可配,其余场景保持原有行为。
  */
-export async function resolveProvider(env: Env, userId: string | null): Promise<ProviderConfig | null> {
+export async function resolveProvider(
+  env: Env,
+  userId: string | null,
+  kind?: AiCallKind
+): Promise<ProviderConfig | null> {
   const row = userId ? await loadAiSettings(env, userId).catch(() => null) : null;
   const choice = activeChoice(row);
-  return choice === RANDOM_PROVIDER ? randomConfig(env, row) : providerConfig(env, row, choice);
+  const cfg = choice === RANDOM_PROVIDER ? randomConfig(env, row) : providerConfig(env, row, choice);
+  return cfg && applyThinking(cfg, kind === "explain_word" ? wordThinking(row) : undefined);
 }
 
 /** 单次调用的延迟日志(AI 统计页用),失败不影响主流程 */
