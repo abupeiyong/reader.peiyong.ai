@@ -7,7 +7,7 @@ export type IconName =
   | "bulb" | "sun" | "moon" | "refresh" | "trash" | "mic" | "play" | "pause"
   | "stop" | "chevron-left" | "chevron-right" | "arrow-left" | "x" | "search"
   | "repeat" | "check" | "award" | "plus" | "minus" | "send" | "logout"
-  | "list" | "message" | "clock" | "edit";
+  | "list" | "message" | "clock" | "edit" | "settings" | "activity";
 
 const ICONS: Record<IconName, ReactNode> = {
   book: <><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></>,
@@ -42,6 +42,8 @@ const ICONS: Record<IconName, ReactNode> = {
   list: <><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></>,
   message: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
   clock: <><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" /></>,
+  settings: <><line x1="4" y1="7" x2="20" y2="7" /><line x1="4" y1="17" x2="20" y2="17" /><circle cx="10" cy="7" r="2.4" /><circle cx="16" cy="17" r="2.4" /></>,
+  activity: <polyline points="3 15 8 15 11 7 15 19 17.5 12 21 12" />,
 };
 
 export function Icon({ name, size = 16, className = "" }: { name: IconName; size?: number; className?: string }) {

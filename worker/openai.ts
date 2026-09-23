@@ -1,21 +1,15 @@
-// OpenAI 接入(gpt-5-nano):用于查词 / 本页解析 / AI 对话。
-// 通过标准 Chat Completions API 调用;配置 OPENAI_API_KEY 后启用,
-// 否则上层自动回退 Workers AI(Llama)→ mock。
+// OpenAI 兼容 Chat Completions 客户端:用于查词 / 本页解析 / AI 对话。
+// OpenAI(gpt-5 系列)和 DeepSeek 共用这一个客户端,差异只在请求体的几个参数上
+// (见 chatBody);用哪家、哪个模型、哪把 key 由 aiprovider.ts 解析。
+// 都没配 key 时上层自动回退 Workers AI(Llama)→ mock。
 // 想经 Cloudflare AI Gateway 统一记录/限流,只需把 OPENAI_BASE_URL 指向
 // gateway 的 openai 兼容端点即可,代码无需改动。
-import type { Env } from "./env";
+import type { ProviderConfig } from "./aiprovider";
 
 export type Msg = { role: "system" | "user" | "assistant"; content: string };
 
-const DEFAULT_MODEL = "gpt-5-nano";
-const DEFAULT_BASE = "https://api.openai.com/v1";
-
-export function openaiEnabled(env: Env): boolean {
-  return Boolean(env.OPENAI_API_KEY);
-}
-
-function chatUrl(env: Env): string {
-  return `${(env.OPENAI_BASE_URL || DEFAULT_BASE).replace(/\/$/, "")}/chat/completions`;
+function chatUrl(cfg: ProviderConfig): string {
+  return `${cfg.baseUrl.replace(/\/$/, "")}/chat/completions`;
 }
 
 interface ChatOpts {
@@ -25,63 +19,71 @@ interface ChatOpts {
   verbosity?: "low" | "medium" | "high";
 }
 
+/** 按模型拼请求体:推理模型与普通模型的 token / 推理参数不同名 */
+function chatBody(cfg: ProviderConfig, messages: Msg[], opts: ChatOpts, stream: boolean) {
+  // gpt-5 系列为推理模型:用 max_completion_tokens,并以 minimal 推理换取低延迟
+  const gpt5 = /^gpt-5/.test(cfg.model);
+  // deepseek-reasoner 不支持 JSON 模式;没有 response_format 时靠 extractJson 兜底解析
+  const jsonMode = opts.json && !/^deepseek-reasoner/.test(cfg.model);
+  const maxTokens = opts.maxTokens ?? 1024;
+  return {
+    model: cfg.model,
+    messages,
+    ...(gpt5
+      ? {
+          max_completion_tokens: maxTokens,
+          reasoning_effort: "minimal",
+          ...(opts.verbosity ? { verbosity: opts.verbosity } : {}),
+        }
+      : { max_tokens: maxTokens }),
+    ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
+    ...(stream ? { stream: true } : {}),
+  };
+}
+
+function chatHeaders(cfg: ProviderConfig): Record<string, string> {
+  return { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` };
+}
+
 /** 非流式:返回助手文本;失败返回 null 让上层回退 */
-export async function openaiChat(env: Env, messages: Msg[], opts: ChatOpts = {}): Promise<string | null> {
-  if (!env.OPENAI_API_KEY) return null;
+export async function openaiChat(cfg: ProviderConfig, messages: Msg[], opts: ChatOpts = {}): Promise<string | null> {
   try {
-    const res = await fetch(chatUrl(env), {
+    const res = await fetch(chatUrl(cfg), {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: env.OPENAI_CHAT_MODEL || DEFAULT_MODEL,
-        messages,
-        // gpt-5 系列为推理模型:用 max_completion_tokens,并以 minimal 推理换取低延迟
-        max_completion_tokens: opts.maxTokens ?? 1024,
-        reasoning_effort: "minimal",
-        ...(opts.verbosity ? { verbosity: opts.verbosity } : {}),
-        ...(opts.json ? { response_format: { type: "json_object" } } : {}),
-      }),
+      headers: chatHeaders(cfg),
+      body: JSON.stringify(chatBody(cfg, messages, opts, false)),
     });
     if (!res.ok) {
-      console.warn("OpenAI chat 失败:", res.status, (await res.text()).slice(0, 300));
+      console.warn(`${cfg.provider} chat 失败:`, res.status, (await res.text()).slice(0, 300));
       return null;
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
     return data.choices?.[0]?.message?.content ?? null;
   } catch (e) {
-    console.warn("OpenAI chat 异常:", (e as Error).message);
+    console.warn(`${cfg.provider} chat 异常:`, (e as Error).message);
     return null;
   }
 }
 
 /** 流式:返回纯文本 chunk 流;不可用返回 null 让上层回退 */
-export async function openaiChatStream(env: Env, messages: Msg[], maxTokens = 1200): Promise<ReadableStream<string> | null> {
-  if (!env.OPENAI_API_KEY) return null;
+export async function openaiChatStream(
+  cfg: ProviderConfig,
+  messages: Msg[],
+  maxTokens = 1200
+): Promise<ReadableStream<string> | null> {
   try {
-    const res = await fetch(chatUrl(env), {
+    const res = await fetch(chatUrl(cfg), {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: env.OPENAI_CHAT_MODEL || DEFAULT_MODEL,
-        messages,
-        max_completion_tokens: maxTokens,
-        reasoning_effort: "minimal",
-        stream: true,
-      }),
+      headers: chatHeaders(cfg),
+      body: JSON.stringify(chatBody(cfg, messages, { maxTokens }, true)),
     });
     if (!res.ok || !res.body) {
-      console.warn("OpenAI stream 失败:", res.status, (await res.text().catch(() => "")).slice(0, 300));
+      console.warn(`${cfg.provider} stream 失败:`, res.status, (await res.text().catch(() => "")).slice(0, 300));
       return null;
     }
     return parseOpenAISSE(res.body);
   } catch (e) {
-    console.warn("OpenAI stream 异常:", (e as Error).message);
+    console.warn(`${cfg.provider} stream 异常:`, (e as Error).message);
     return null;
   }
 }

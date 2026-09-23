@@ -1,9 +1,10 @@
 // AI 能力抽象层:优先 Workers AI,不可用时(本地未登录 Cloudflare 等)自动回退到
 // 确定性的 mock 实现,保证整条产品链路在本地可跑通。上线后无需改代码。
 import type { Env } from "./env";
-import type { PageAnalysis, WordExplanation } from "../shared/types";
+import type { AiCallKind, PageAnalysis, WordExplanation } from "../shared/types";
 import { extractJson } from "./util";
 import { openaiChat, openaiChatStream } from "./openai";
+import { logAiCall, resolveProvider } from "./aiprovider";
 
 // 流式聊天兜底仍用 llama(gpt-oss 流式为 Responses 事件流,解析格式不同,暂不切)
 const CHAT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
@@ -13,16 +14,51 @@ const WHISPER_MODEL = "@cf/openai/whisper";
 
 type Msg = { role: "system" | "user" | "assistant"; content: string };
 
-// 文本生成:优先 OpenAI(gpt-5-nano)→ 回退 Workers AI(gpt-oss-120b)→ null(上层用 mock)
+interface LlmOpts {
+  maxTokens?: number;
+  json?: boolean;
+  verbosity?: "low" | "medium" | "high";
+}
+
+/**
+ * 只走用户选定的提供商(OpenAI / DeepSeek),不回退 Workers AI;不可用返回 null。
+ * 每次调用都把延迟记进 ai_calls,供 AI 统计页对比两家。
+ */
+export async function llmChat(
+  env: Env,
+  userId: string | null,
+  kind: AiCallKind,
+  messages: Msg[],
+  opts: LlmOpts = {}
+): Promise<string | null> {
+  const cfg = await resolveProvider(env, userId);
+  if (!cfg) return null;
+  const t0 = Date.now();
+  const text = await openaiChat(cfg, messages, opts);
+  void logAiCall(env, {
+    userId,
+    provider: cfg.provider,
+    model: cfg.model,
+    kind,
+    latencyMs: Date.now() - t0,
+    ok: text != null,
+  });
+  return text;
+}
+
+// 文本生成:优先用户选定的提供商 → 回退 Workers AI(gpt-oss-120b)→ null(上层用 mock)
 async function runLLM(
   env: Env,
+  userId: string | null,
+  kind: AiCallKind,
   messages: Msg[],
   maxTokens = 1024,
   json = false,
   verbosity?: "low" | "medium" | "high"
 ): Promise<string | null> {
-  const oa = await openaiChat(env, messages, { maxTokens, json, verbosity });
+  const oa = await llmChat(env, userId, kind, messages, { maxTokens, json, verbosity });
   if (oa != null) return oa;
+  const t0 = Date.now();
   try {
     if (!env.AI) throw new Error("本地开发无 AI 绑定");
     // gpt-oss 走 Responses 风格:input 纯文本;输出在 output[].content[].text
@@ -38,7 +74,16 @@ async function runLLM(
     };
     const msg = res?.output?.find((o) => o.type === "message");
     const text = res?.output_text ?? msg?.content?.map((c) => c.text ?? "").join("");
-    return text?.trim() ? text : null;
+    const out = text?.trim() ? text : null;
+    void logAiCall(env, {
+      userId,
+      provider: "workers-ai",
+      model: FALLBACK_MODEL,
+      kind,
+      latencyMs: Date.now() - t0,
+      ok: out != null,
+    });
+    return out;
   } catch (e) {
     console.warn("Workers AI 不可用,回退 mock:", (e as Error).message);
     return null;
@@ -49,6 +94,7 @@ async function runLLM(
 
 export async function explainWord(
   env: Env,
+  userId: string | null,
   word: string,
   sentence: string,
   level: string
@@ -57,7 +103,7 @@ export async function explainWord(
   const prompt = `英语助手,用户水平 ${level}。结合句子解释单词,只返回 JSON:
 {"word":"原词","phonetic":"IPA 音标","pos":"本句词性","meaning_zh":"语境中文释义","meaning_in_context":"这句里的含义,中文1句","collocations":["2-3个常见搭配"],"forms":["主要词形变化"],"examples":["1个短英文例句(附中文)"]}
 单词:"${word}" 句子:"${sentence}"`;
-  const text = await runLLM(env, [{ role: "user", content: prompt }], 500, true, "low");
+  const text = await runLLM(env, userId, "explain_word", [{ role: "user", content: prompt }], 500, true, "low");
   if (text) {
     const parsed = extractJson<WordExplanation>(text);
     if (parsed && parsed.word) return { ...parsed, source: "ai" };
@@ -81,7 +127,12 @@ function mockExplainWord(word: string, sentence: string): WordExplanation {
 
 // ---------- 本页解析 ----------
 
-export async function analyzePage(env: Env, pageText: string, level: string): Promise<PageAnalysis> {
+export async function analyzePage(
+  env: Env,
+  userId: string | null,
+  pageText: string,
+  level: string
+): Promise<PageAnalysis> {
   const truncated = pageText.slice(0, 6000);
   const prompt = `你是英语阅读助手。用户英语水平:${level}。分析下面这一页英文文本,帮助中文母语者学习。只返回 JSON,不要多余文字,格式:
 {
@@ -95,7 +146,7 @@ export async function analyzePage(env: Env, pageText: string, level: string): Pr
 """
 ${truncated}
 """`;
-  const text = await runLLM(env, [{ role: "user", content: prompt }], 1600, true);
+  const text = await runLLM(env, userId, "analyze_page", [{ role: "user", content: prompt }], 1600, true);
   if (text) {
     const parsed = extractJson<PageAnalysis>(text);
     if (parsed && Array.isArray(parsed.vocabulary)) {
@@ -130,11 +181,23 @@ function mockAnalyzePage(pageText: string): PageAnalysis {
 
 // ---------- 聊天(流式) ----------
 
-export async function chatStream(env: Env, messages: Msg[]): Promise<{ stream: ReadableStream<string>; source: "ai" | "mock" }> {
-  // 优先 OpenAI(gpt-5-nano)流式
-  const oaStream = await openaiChatStream(env, messages, 1200);
-  if (oaStream) return { stream: oaStream, source: "ai" };
+export async function chatStream(
+  env: Env,
+  userId: string | null,
+  messages: Msg[]
+): Promise<{ stream: ReadableStream<string>; source: "ai" | "mock" }> {
+  // 优先用户选定的提供商(OpenAI / DeepSeek)流式
+  const cfg = await resolveProvider(env, userId);
+  if (cfg) {
+    const t0 = Date.now();
+    const oaStream = await openaiChatStream(cfg, messages, 1200);
+    if (oaStream) {
+      return { stream: logFirstChunk(env, oaStream, { userId, provider: cfg.provider, model: cfg.model }, t0), source: "ai" };
+    }
+    void logAiCall(env, { userId, provider: cfg.provider, model: cfg.model, kind: "chat", latencyMs: Date.now() - t0, ok: false, stream: true });
+  }
   // 回退 Workers AI(Llama)流式
+  const t1 = Date.now();
   try {
     if (!env.AI) throw new Error("本地开发无 AI 绑定");
     const res = (await env.AI.run(CHAT_MODEL as Parameters<Ai["run"]>[0], {
@@ -142,11 +205,42 @@ export async function chatStream(env: Env, messages: Msg[]): Promise<{ stream: R
       max_tokens: 1200,
       stream: true,
     })) as unknown as ReadableStream<Uint8Array>;
-    return { stream: parseSSEToText(res), source: "ai" };
+    const wrapped = logFirstChunk(env, parseSSEToText(res), { userId, provider: "workers-ai", model: CHAT_MODEL }, t1);
+    return { stream: wrapped, source: "ai" };
   } catch (e) {
     console.warn("Workers AI 流式不可用,回退 mock:", (e as Error).message);
     return { stream: mockChatStream(messages), source: "mock" };
   }
+}
+
+/**
+ * 流式调用记「到首个内容块」的延迟(TTFT):这才是用户感知到的等待,
+ * 也是唯一能和非流式调用放在一起比较的口径。整段生成完才知道的总耗时不记。
+ */
+function logFirstChunk(
+  env: Env,
+  stream: ReadableStream<string>,
+  who: { userId: string | null; provider: string; model: string },
+  startedAt: number
+): ReadableStream<string> {
+  let logged = false;
+  return stream.pipeThrough(
+    new TransformStream<string, string>({
+      transform(chunk, controller) {
+        if (!logged) {
+          logged = true;
+          void logAiCall(env, { ...who, kind: "chat", latencyMs: Date.now() - startedAt, ok: true, stream: true });
+        }
+        controller.enqueue(chunk);
+      },
+      flush() {
+        // 一个 chunk 都没吐出来:算这次调用失败,免得统计里少一笔
+        if (!logged) {
+          void logAiCall(env, { ...who, kind: "chat", latencyMs: Date.now() - startedAt, ok: false, stream: true });
+        }
+      },
+    })
+  );
 }
 
 /** Workers AI 流式返回 SSE 字节流(data: {"response":"..."}),转成纯文本 chunk 流 */

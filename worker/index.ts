@@ -8,7 +8,27 @@ import { estimateVocabRank, hintsForText, applyReview, priorRank, type ReviewGra
 import { wordRank } from "./wordfreq";
 import { telegramEnabled, handleUpdate, runDailyPush } from "./telegram";
 import { generateCover } from "./cover";
-import { DAILY_GOAL_MS, type ChatScope, type ReadingToday } from "../shared/types";
+import {
+  PROVIDERS,
+  PROVIDER_IDS,
+  activeModel,
+  activeProvider,
+  envKey,
+  envModel,
+  isProviderId,
+  loadAiSettings,
+  userKey,
+} from "./aiprovider";
+import {
+  DAILY_GOAL_MS,
+  type AiCallKind,
+  type AiCallLog,
+  type AiLatencyGroup,
+  type AiSettings,
+  type AiStats,
+  type ChatScope,
+  type ReadingToday,
+} from "../shared/types";
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>();
 
@@ -304,7 +324,7 @@ api.post("/books/:id/pages/:no/analysis", async (c) => {
   const user = await c.env.DB.prepare("SELECT english_level FROM users WHERE id = ?")
     .bind(userId)
     .first<{ english_level: string }>();
-  const analysis = await analyzePage(c.env, row.text, user?.english_level ?? "intermediate");
+  const analysis = await analyzePage(c.env, userId, row.text, user?.english_level ?? "intermediate");
   await c.env.DB.prepare("UPDATE pages SET analysis_json = ? WHERE book_id = ? AND page_no = ?")
     .bind(JSON.stringify(analysis), book.id, pageNo)
     .run();
@@ -448,7 +468,7 @@ api.post("/review/:id/explanation", async (c) => {
   const user = await c.env.DB.prepare("SELECT english_level FROM users WHERE id = ?")
     .bind(userId)
     .first<{ english_level: string }>();
-  const exp = await explainWord(c.env, item.word, item.context_sentence ?? "", user?.english_level ?? "intermediate");
+  const exp = await explainWord(c.env, userId, item.word, item.context_sentence ?? "", user?.english_level ?? "intermediate");
   if (exp.source !== "mock") {
     await c.env.DB.prepare("UPDATE vocab SET explanation_json = ? WHERE id = ? AND user_id = ?")
       .bind(JSON.stringify(exp), item.id, userId)
@@ -541,6 +561,137 @@ api.get("/stats", async (c) => {
     vocab_rank: vocabRank,
     vocab_trend: trend,
   });
+});
+
+// ---------- AI 提供商设置(OpenAI / DeepSeek)----------
+
+// key 只回显末 4 位:填过之后前端也拿不到明文
+function keyHint(key: string): string {
+  return key.length > 4 ? `…${key.slice(-4)}` : key ? "…" : "";
+}
+
+api.get("/ai/settings", async (c) => {
+  const row = await loadAiSettings(c.env, c.get("userId"));
+  const provider = activeProvider(row);
+  const body: AiSettings = {
+    provider,
+    model: activeModel(c.env, row, provider),
+    providers: PROVIDER_IDS.map((id) => {
+      const fromUser = userKey(row, id);
+      const fromEnv = envKey(c.env, id);
+      const key = fromUser || fromEnv;
+      return {
+        id,
+        label: PROVIDERS[id].label,
+        models: PROVIDERS[id].models,
+        default_model: envModel(c.env, id),
+        key_set: Boolean(key),
+        key_source: fromUser ? "user" : fromEnv ? "env" : null,
+        key_hint: keyHint(key),
+      };
+    }),
+  };
+  return c.json(body);
+});
+
+// 提供商 / 模型 / API key。key 传空串 = 清除(回退环境变量的 secret),不传 = 不动。
+api.post("/ai/settings", async (c) => {
+  const userId = c.get("userId");
+  const body = await c.req.json<{
+    provider?: string;
+    model?: string;
+    openai_api_key?: string;
+    deepseek_api_key?: string;
+  }>();
+  const row = await loadAiSettings(c.env, userId);
+  const target = isProviderId(body.provider) ? body.provider : activeProvider(row);
+  if (body.provider !== undefined && !isProviderId(body.provider)) {
+    return c.json({ error: "未知的 provider" }, 400);
+  }
+  if (body.model !== undefined && !PROVIDERS[target].models.includes(body.model)) {
+    return c.json({ error: `${PROVIDERS[target].label} 不支持模型 ${body.model}` }, 400);
+  }
+
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (body.provider !== undefined) {
+    sets.push("ai_provider = ?");
+    vals.push(target);
+    // 换提供商时清掉旧模型,避免把上一家的模型名带过去
+    if (body.model === undefined && target !== activeProvider(row)) {
+      sets.push("ai_model = ?");
+      vals.push(null);
+    }
+  }
+  if (body.model !== undefined) {
+    sets.push("ai_model = ?");
+    vals.push(body.model);
+  }
+  for (const id of PROVIDER_IDS) {
+    const raw = id === "deepseek" ? body.deepseek_api_key : body.openai_api_key;
+    if (raw === undefined) continue;
+    sets.push(`${id === "deepseek" ? "deepseek_api_key" : "openai_api_key"} = ?`);
+    vals.push(raw.trim() || null);
+  }
+  if (sets.length) {
+    vals.push(userId);
+    await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+  }
+  return c.json({ ok: true });
+});
+
+// ---------- AI 调用延迟统计(提供商对比)----------
+
+function summarize(rows: { latency_ms: number; ok: number; created_at: number }[]): Omit<AiLatencyGroup, "provider" | "model" | "kind"> {
+  const sorted = rows.map((r) => r.latency_ms).sort((a, b) => a - b);
+  const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
+  return {
+    calls: rows.length,
+    ok_calls: rows.filter((r) => r.ok === 1).length,
+    avg_ms: Math.round(sorted.reduce((a, b) => a + b, 0) / sorted.length),
+    p50_ms: at(0.5),
+    p95_ms: at(0.95),
+    min_ms: sorted[0],
+    max_ms: sorted[sorted.length - 1],
+    last_at: Math.max(...rows.map((r) => r.created_at)),
+  };
+}
+
+api.get("/ai/stats", async (c) => {
+  const days = Math.min(365, Math.max(1, Number(c.req.query("days") ?? 30) || 30));
+  // 行数不多(一次调用一行),直接取回来在 JS 里算分位数:SQLite 没有 percentile 函数
+  const { results } = await c.env.DB.prepare(
+    `SELECT provider, model, kind, latency_ms, ok, stream, created_at FROM ai_calls
+     WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 5000`
+  )
+    .bind(c.get("userId"), now() - days * 24 * 3600 * 1000)
+    .all<AiCallLog>();
+
+  const group = (keyOf: (r: AiCallLog) => string) => {
+    const buckets = new Map<string, AiCallLog[]>();
+    for (const r of results) {
+      const k = keyOf(r);
+      const list = buckets.get(k);
+      if (list) list.push(r);
+      else buckets.set(k, [r]);
+    }
+    return [...buckets.values()];
+  };
+
+  const byModel: AiLatencyGroup[] = group((r) => `${r.provider}|${r.model}`)
+    .map((rows) => ({ provider: rows[0].provider, model: rows[0].model, kind: "all" as const, ...summarize(rows) }))
+    .sort((a, b) => b.calls - a.calls);
+  const byKind: AiLatencyGroup[] = group((r) => `${r.provider}|${r.model}|${r.kind}`)
+    .map((rows) => ({
+      provider: rows[0].provider,
+      model: rows[0].model,
+      kind: rows[0].kind as AiCallKind,
+      ...summarize(rows),
+    }))
+    .sort((a, b) => (a.kind === b.kind ? a.avg_ms - b.avg_ms : a.kind < b.kind ? -1 : 1));
+
+  const body: AiStats = { days, total_calls: results.length, by_model: byModel, by_kind: byKind, recent: results.slice(0, 20) };
+  return c.json(body);
 });
 
 // ---------- 云端 TTS / STT ----------
@@ -679,7 +830,7 @@ api.post("/ai/explain-word", async (c) => {
     }
   }
 
-  const exp = await explainWord(c.env, body.word, body.sentence ?? "", level);
+  const exp = await explainWord(c.env, userId, body.word, body.sentence ?? "", level);
   if (exp.source !== "mock") {
     c.executionCtx.waitUntil(
       c.env.DB.prepare(
@@ -920,7 +1071,7 @@ ${contextParts.join("\n\n") || "(本页暂无文本)"}`;
     { role: "user" as const, content: body.message },
   ];
 
-  const { stream, source } = await chatStream(c.env, messages);
+  const { stream, source } = await chatStream(c.env, userId, messages);
 
   const encoder = new TextEncoder();
   const db = c.env.DB;

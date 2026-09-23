@@ -2,8 +2,7 @@
 // 未配置 TELEGRAM_BOT_TOKEN 时全部功能优雅关闭。
 import type { Env } from "./env";
 import type { WordExplanation } from "../shared/types";
-import { openaiChat } from "./openai";
-import { explainWord } from "./ai";
+import { explainWord, llmChat } from "./ai";
 import { now } from "./util";
 import { issueLoginCode, chatAllowed } from "./logincode";
 
@@ -103,9 +102,11 @@ export async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
     return;
   }
 
-  // 普通消息 → gpt-5-nano 回答(英语学习助手)
-  const reply = await openaiChat(
+  // 普通消息 → 当前提供商回答(英语学习助手)
+  const reply = await llmChat(
     env,
+    user.id,
+    "telegram",
     [
       {
         role: "system",
@@ -137,7 +138,7 @@ async function vocabLines(env: Env, userId: string, rows: VocabRow[]): Promise<s
       }
     }
     if (!exp) {
-      const generated = await explainWord(env, r.word, r.context_sentence ?? "", level);
+      const generated = await explainWord(env, userId, r.word, r.context_sentence ?? "", level);
       if (generated.source !== "mock") {
         exp = generated;
         await env.DB.prepare("UPDATE vocab SET explanation_json = ? WHERE id = ?")
@@ -268,8 +269,10 @@ async function pushDaily(env: Env, userId: string, chatId: string): Promise<void
       .bind(reading.book_id, reading.page_no)
       .first<{ text: string }>();
     if (page?.text && page.text.length > 60) {
-      const recap = await openaiChat(
+      const recap = await llmChat(
         env,
+        userId,
+        "telegram",
         [
           { role: "system", content: "用一句简洁的中文概括这段英文的主要内容,帮助读者回顾。只输出这句话。" },
           { role: "user", content: page.text.slice(0, 2500) },

@@ -15,7 +15,10 @@
   为非嵌入字体配置标准字体数据;自动检测并优雅降级损坏的文本层
 - 每段首行左侧的段落朗读按钮(基于首行缩进分段);朗读时句子同步高亮
 
-**AI(gpt-5-nano,OpenAI 兼容端点;不可用时回退 Workers AI → mock)**
+**AI(OpenAI gpt-5-nano 或 DeepSeek,均走 OpenAI 兼容端点;不可用时回退 Workers AI → mock)**
+- 设置页(`#/settings`)切换提供商与模型,并填 OpenAI / DeepSeek 的 API key
+  (存在账号上,不回显明文;留空保存 = 清除并回退部署时的 secret)
+- AI 统计页(`#/ai-stats`)按提供商/模型对比响应延迟(中位数/均值/p95;流式对话记首个 token 的延迟)
 - 语境化查词:音标、词性、释义、语境含义、搭配、词形、例句 —— 全部保存供复习
 - 本页解析:生词、短语、长难句、背景知识
 - 流式对话,范围可切(选中/本页/整本书),`[p.N]` 页码引用可点击跳回原文
@@ -45,24 +48,24 @@
 
 ## 技术栈
 React + TS + Vite · Cloudflare Workers + Hono · D1 · R2 · Vectorize ·
-Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano · ElevenLabs TTS
+Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 
 ## 开发 / 部署
 - 本地:`npm run dev`(用 `wrangler.dev.jsonc`,无 AI 绑定 → 离线 mock)
-- 部署:`npm run deploy`;迁移 0001–0010(`npm run db:migrate:remote`)
-- Secret:`OPENAI_API_KEY`、`ELEVENLABS_API_KEY`、`TELEGRAM_BOT_TOKEN`、
+- 部署:`npm run deploy`;迁移 0001–0011(`npm run db:migrate:remote`)
+- Secret:`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`(可选,也可在设置页填)、`ELEVENLABS_API_KEY`、`TELEGRAM_BOT_TOKEN`、
   `TELEGRAM_WEBHOOK_SECRET`、`TELEGRAM_OWNER_CHAT_ID`(可选,限定唯一可登录的 chat)
 - 本地开发(`APP_ENV != production`)保留邮箱直登,供 e2e 用;生产环境自动禁用
 - Vectorize 索引 `reader-vec`(1024 维,cosine),部署前创建一次
 - Cron `0 * * * *` 驱动 Telegram 每日推送
-- `OPENAI_BASE_URL` 可在 OpenAI 直连与兼容网关间切换
+- `OPENAI_BASE_URL` / `DEEPSEEK_BASE_URL` 可在直连与兼容网关间切换
 - `public/standard_fonts` + `public/cmaps` 由 prebuild 钩子从 pdfjs-dist 同步
 
 ## 目录结构
 ```
-worker/    Hono API + auth.ts / logincode.ts / ai.ts / openai.ts / elevenlabs.ts / telegram.ts / vocabmodel.ts
+worker/    Hono API + auth.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / telegram.ts / vocabmodel.ts
 src/       React 前端(pages/ 页面,components/ 组件,lib/ PDF·TTS·录音·TOC)
 shared/    前后端共享类型
-migrations/ D1 迁移(0001 MVP … 0010 登录码)
+migrations/ D1 迁移(0001 MVP … 0011 AI 提供商与延迟日志)
 scripts/   Playwright 端到端自测(scripts/e2e.mjs)
 ```
