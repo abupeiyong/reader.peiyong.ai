@@ -4,6 +4,7 @@
 // key 的优先级:设置页填的(users 表)> 部署时的环境变量 secret。
 // 选中的提供商没有 key 时 resolveProvider 返回 null,上层照旧回退 Workers AI → mock。
 import type { Env } from "./env";
+import { openaiListModels } from "./openai";
 import { now } from "./util";
 import type { AiCallKind, AiProviderId } from "../shared/types";
 
@@ -11,7 +12,11 @@ interface Spec {
   label: string;
   base: string;
   model: string;
-  models: string[]; // 设置页可选的模型(服务端也用它校验)
+  models: string[]; // 内置清单:没有 key 或问不到 /models 时的兜底
+  /** 属于这家的模型名;OpenAI 的 /models 里混着 embedding/tts,要按这个过滤 */
+  owns: RegExp;
+  /** 是否向 /models 要实时清单(DeepSeek 只返回对话模型,直接可用) */
+  live?: boolean;
 }
 
 export const PROVIDERS: Record<AiProviderId, Spec> = {
@@ -20,12 +25,15 @@ export const PROVIDERS: Record<AiProviderId, Spec> = {
     base: "https://api.openai.com/v1",
     model: "gpt-5-nano",
     models: ["gpt-5-nano", "gpt-5-mini", "gpt-5"],
+    owns: /^(gpt|o\d|chatgpt)/i,
   },
   deepseek: {
     label: "DeepSeek",
     base: "https://api.deepseek.com/v1",
     model: "deepseek-chat",
     models: ["deepseek-chat", "deepseek-reasoner"],
+    owns: /^deepseek/i,
+    live: true,
   },
 };
 
@@ -127,13 +135,50 @@ export function activeProvider(row: AiSettingsRow | null): AiProviderId {
   return isProviderId(row?.ai_provider) ? row.ai_provider : DEFAULT_PROVIDER;
 }
 
+/** 模型名是不是这家的:内置清单之外,也认 /models 里新出现的同族模型 */
+export function ownsModel(p: AiProviderId, model: string): boolean {
+  return PROVIDERS[p].models.includes(model) || PROVIDERS[p].owns.test(model);
+}
+
+// 实时模型清单的进程内缓存:设置页每次打开都问一遍 /models 太慢,缓存 10 分钟。
+// 只缓存成功的结果,失败时下次再试(失败会临时退回内置清单)。
+const MODELS_TTL_MS = 10 * 60 * 1000;
+const modelsCache = new Map<string, { at: number; models: string[] }>();
+
+/**
+ * 设置页可选的模型。live 的提供商(DeepSeek)优先用它 /models 返回的真实清单,
+ * 这样新上/下线的模型不用改代码就能选到;没 key、超时或返回空时退回内置清单。
+ */
+export async function providerModels(env: Env, row: AiSettingsRow | null, p: AiProviderId): Promise<string[]> {
+  const spec = PROVIDERS[p];
+  const fallback = spec.models;
+  if (!spec.live) return fallback;
+
+  const apiKey = userKey(row, p) || envKey(env, p);
+  if (!apiKey) return fallback;
+
+  const baseUrl = envBase(env, p);
+  const cacheKey = `${p}|${baseUrl}|${apiKey.slice(-6)}`;
+  const hit = modelsCache.get(cacheKey);
+  if (hit && now() - hit.at < MODELS_TTL_MS) return hit.models;
+
+  const live = await openaiListModels({ provider: p, apiKey, baseUrl });
+  const ids = (live ?? []).filter((m) => spec.owns.test(m)).sort();
+  if (!ids.length) return fallback;
+
+  // 默认模型必须在列表里,否则设置页的下拉会显示一个选不中的值
+  const models = ids.includes(envModel(env, p)) ? ids : [envModel(env, p), ...ids];
+  modelsCache.set(cacheKey, { at: now(), models });
+  return models;
+}
+
 /**
  * 当前生效的模型。ai_model 只在属于该提供商时才认:
  * 换提供商后残留的旧模型名不会被带过去(否则请求必然 400)。
  */
 export function activeModel(env: Env, row: AiSettingsRow | null, p: AiProviderId): string {
   const chosen = (row?.ai_model ?? "").trim();
-  return chosen && PROVIDERS[p].models.includes(chosen) ? chosen : envModel(env, p);
+  return chosen && ownsModel(p, chosen) ? chosen : envModel(env, p);
 }
 
 export function providerConfig(env: Env, row: AiSettingsRow | null, p: AiProviderId): ProviderConfig | null {
