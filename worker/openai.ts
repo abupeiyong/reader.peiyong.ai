@@ -25,14 +25,18 @@ function chatBody(cfg: ProviderConfig, messages: Msg[], opts: ChatOpts, stream: 
   const gpt5 = /^gpt-5/.test(cfg.model);
   // deepseek-reasoner 不支持 JSON 模式;没有 response_format 时靠 extractJson 兜底解析
   const jsonMode = opts.json && !/^deepseek-reasoner/.test(cfg.model);
-  const maxTokens = opts.maxTokens ?? 1024;
+  // 显式开了思考才上调推理档;默认(含关闭)保持 minimal —— 低延迟是这几个场景的前提
+  const effort = cfg.thinking === true ? "low" : "minimal";
+  // 推理会先吃掉一部分 token 预算,开着思考时给正文留足余量,
+  // 否则查词这种短预算(500)可能全被推理花光,换回 200 + 空内容。
+  const maxTokens = Math.max(opts.maxTokens ?? 1024, cfg.thinking === true ? 1500 : 0);
   return {
     model: cfg.model,
     messages,
     ...(gpt5
       ? {
           max_completion_tokens: maxTokens,
-          reasoning_effort: "minimal",
+          reasoning_effort: effort,
           ...(opts.verbosity ? { verbosity: opts.verbosity } : {}),
         }
       : { max_tokens: maxTokens }),

@@ -152,6 +152,8 @@ export interface AiSettings {
   provider: AiProviderChoice;
   model: string;        // 当前生效的模型;random 时为空串(各家各用自己的默认模型)
   providers: AiProviderInfo[];
+  /** 查词时是否让模型先「思考」(推理);默认 false —— 查词要的是快 */
+  word_thinking: boolean;
 }
 
 export interface AiLatencyGroup {

@@ -24,6 +24,7 @@ import {
   providerModels,
   userKey,
   withAiSchema,
+  wordThinking,
 } from "./aiprovider";
 import {
   DAILY_GOAL_MS,
@@ -600,11 +601,12 @@ api.get("/ai/settings", async (c) => {
         key_hint: keyHint(key),
       };
     }),
+    word_thinking: wordThinking(row),
   };
   return c.json(body);
 });
 
-// 提供商 / 模型 / API key。key 传空串 = 清除(回退环境变量的 secret),不传 = 不动。
+// 提供商 / 模型 / API key / 查词是否思考。key 传空串 = 清除(回退环境变量的 secret),不传 = 不动。
 api.post("/ai/settings", async (c) => {
   const userId = c.get("userId");
   const body = await c.req.json<{
@@ -612,10 +614,14 @@ api.post("/ai/settings", async (c) => {
     model?: string;
     openai_api_key?: string;
     deepseek_api_key?: string;
+    word_thinking?: boolean;
   }>();
   const row = await loadAiSettings(c.env, userId);
   if (body.provider !== undefined && !isProviderChoice(body.provider)) {
     return c.json({ error: "未知的 provider" }, 400);
+  }
+  if (body.word_thinking !== undefined && typeof body.word_thinking !== "boolean") {
+    return c.json({ error: "word_thinking 必须是布尔值" }, 400);
   }
   const current = activeChoice(row);
   const target = isProviderChoice(body.provider) ? body.provider : current;
@@ -642,6 +648,10 @@ api.post("/ai/settings", async (c) => {
   if (body.model !== undefined) {
     sets.push("ai_model = ?");
     vals.push(body.model);
+  }
+  if (body.word_thinking !== undefined) {
+    sets.push("ai_word_thinking = ?");
+    vals.push(body.word_thinking ? 1 : 0);
   }
   for (const id of PROVIDER_IDS) {
     const raw = id === "deepseek" ? body.deepseek_api_key : body.openai_api_key;

@@ -31,7 +31,7 @@ export async function llmChat(
   messages: Msg[],
   opts: LlmOpts = {}
 ): Promise<string | null> {
-  const cfg = await resolveProvider(env, userId);
+  const cfg = await resolveProvider(env, userId, kind);
   if (!cfg) return null;
   const t0 = Date.now();
   const text = await openaiChat(cfg, messages, opts);
@@ -99,7 +99,8 @@ export async function explainWord(
   sentence: string,
   level: string
 ): Promise<WordExplanation> {
-  // 精简 prompt + verbosity low:输出 token 是延迟主因,实测比长版快 ~35%
+  // 精简 prompt + verbosity low:输出 token 是延迟主因,实测比长版快 ~35%。
+  // 查词默认还会关掉模型的「思考」(设置页可开),见 aiprovider.applyThinking。
   const prompt = `英语助手,用户水平 ${level}。结合句子解释单词,只返回 JSON:
 {"word":"原词","phonetic":"IPA 音标","pos":"本句词性","meaning_zh":"语境中文释义","meaning_in_context":"这句里的含义,中文1句","collocations":["2-3个常见搭配"],"forms":["主要词形变化"],"examples":["1个短英文例句(附中文)"]}
 单词:"${word}" 句子:"${sentence}"`;
@@ -187,7 +188,7 @@ export async function chatStream(
   messages: Msg[]
 ): Promise<{ stream: ReadableStream<string>; source: "ai" | "mock" }> {
   // 优先用户选定的提供商(OpenAI / DeepSeek)流式
-  const cfg = await resolveProvider(env, userId);
+  const cfg = await resolveProvider(env, userId, "chat");
   if (cfg) {
     const t0 = Date.now();
     const oaStream = await openaiChatStream(cfg, messages, 1200);
