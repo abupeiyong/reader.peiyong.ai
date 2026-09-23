@@ -32,6 +32,7 @@ import {
   type AiCallKind,
   type AiCallLog,
   type AiLatencyGroup,
+  type AiProviderId,
   type AiProviderTest,
   type AiSettings,
   type AiStats,
@@ -609,11 +610,16 @@ api.get("/ai/settings", async (c) => {
 });
 
 // 提供商 / 模型 / API key / 查词是否思考。key 传空串 = 清除(回退环境变量的 secret),不传 = 不动。
+// 模型有两种写法:`model` 给当前选中的那家(random 下没有「当前那家」,所以报错),
+// `openai_model` / `deepseek_model` 指名道姓给某一家 —— random 模式下设置页用后者,
+// 不用先切回那家再切回来(切走也不会丢,只是改起来要绕一圈)。
 api.post("/ai/settings", async (c) => {
   const userId = c.get("userId");
   const body = await c.req.json<{
     provider?: string;
     model?: string;
+    openai_model?: string;
+    deepseek_model?: string;
     openai_api_key?: string;
     deepseek_api_key?: string;
     word_thinking?: boolean;
@@ -633,16 +639,25 @@ api.post("/ai/settings", async (c) => {
     sets.push("ai_provider = ?");
     vals.push(target);
   }
-  // 模型记在这家自己的列上:换提供商(含切到 random)不会弄丢已选的模型
+  // 模型记在这家自己的列上:换提供商(含切到 random)不会弄丢已选的模型。
+  // 两种写法归到同一张表里,免得同一列在 UPDATE 里出现两次。
+  const picks = new Map<AiProviderId, string>();
   if (body.model !== undefined) {
     if (target === RANDOM_PROVIDER) {
-      return c.json({ error: "随机模式下抽到哪家就用哪家已选的模型,不能在这里指定模型" }, 400);
+      return c.json({ error: "随机模式下要指定模型请用 openai_model / deepseek_model" }, 400);
     }
-    if (!(await providerModels(c.env, row, target)).includes(body.model)) {
-      return c.json({ error: `${PROVIDERS[target].label} 不支持模型 ${body.model}` }, 400);
+    picks.set(target, body.model);
+  }
+  for (const id of PROVIDER_IDS) {
+    const model = id === "deepseek" ? body.deepseek_model : body.openai_model;
+    if (model !== undefined) picks.set(id, model);
+  }
+  for (const [id, model] of picks) {
+    if (!(await providerModels(c.env, row, id)).includes(model)) {
+      return c.json({ error: `${PROVIDERS[id].label} 不支持模型 ${model}` }, 400);
     }
-    sets.push(`${modelColumn(target)} = ?`);
-    vals.push(body.model);
+    sets.push(`${modelColumn(id)} = ?`);
+    vals.push(model);
   }
   if (body.word_thinking !== undefined) {
     sets.push("ai_word_thinking = ?");
