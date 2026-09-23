@@ -3,10 +3,11 @@
 //
 // key 的优先级:设置页填的(users 表)> 部署时的环境变量 secret。
 // 选中的提供商没有 key 时 resolveProvider 返回 null,上层照旧回退 Workers AI → mock。
+// 除了固定某一家,还能选 random:每次调用在有 key 的几家里随机挑一家(见 resolveProvider)。
 import type { Env } from "./env";
 import { openaiListModels } from "./openai";
 import { now } from "./util";
-import type { AiCallKind, AiProviderId } from "../shared/types";
+import type { AiCallKind, AiProviderChoice, AiProviderId } from "../shared/types";
 
 interface Spec {
   label: string;
@@ -39,9 +40,15 @@ export const PROVIDERS: Record<AiProviderId, Spec> = {
 
 export const PROVIDER_IDS = Object.keys(PROVIDERS) as AiProviderId[];
 export const DEFAULT_PROVIDER: AiProviderId = "openai";
+/** 「每次调用随机挑一家」的伪提供商,存在 users.ai_provider 里 */
+export const RANDOM_PROVIDER = "random";
 
 export function isProviderId(v: unknown): v is AiProviderId {
   return typeof v === "string" && (PROVIDER_IDS as string[]).includes(v);
+}
+
+export function isProviderChoice(v: unknown): v is AiProviderChoice {
+  return v === RANDOM_PROVIDER || isProviderId(v);
 }
 
 export interface ProviderConfig {
@@ -131,8 +138,9 @@ function envBase(env: Env, p: AiProviderId): string {
   return (p === "deepseek" ? env.DEEPSEEK_BASE_URL : env.OPENAI_BASE_URL) || PROVIDERS[p].base;
 }
 
-export function activeProvider(row: AiSettingsRow | null): AiProviderId {
-  return isProviderId(row?.ai_provider) ? row.ai_provider : DEFAULT_PROVIDER;
+/** 设置页当前选的:某一家,或 random */
+export function activeChoice(row: AiSettingsRow | null): AiProviderChoice {
+  return isProviderChoice(row?.ai_provider) ? row.ai_provider : DEFAULT_PROVIDER;
 }
 
 /** 模型名是不是这家的:内置清单之外,也认 /models 里新出现的同族模型 */
@@ -187,10 +195,26 @@ export function providerConfig(env: Env, row: AiSettingsRow | null, p: AiProvide
   return { provider: p, model: activeModel(env, row, p), apiKey, baseUrl: envBase(env, p) };
 }
 
-/** 该用户当前该用哪家/哪个模型/哪把 key;没有可用 key 返回 null */
+/**
+ * random 模式:在「有 key 能用」的提供商里等概率挑一家。
+ * 只有一家有 key 时就是那家;一家都没有返回 null(上层回退 Workers AI → mock)。
+ */
+function randomConfig(env: Env, row: AiSettingsRow | null): ProviderConfig | null {
+  const usable = PROVIDER_IDS.map((id) => providerConfig(env, row, id)).filter(
+    (cfg): cfg is ProviderConfig => cfg !== null
+  );
+  if (!usable.length) return null;
+  return usable[Math.floor(Math.random() * usable.length)];
+}
+
+/**
+ * 该用户这次调用该用哪家/哪个模型/哪把 key;没有可用 key 返回 null。
+ * 每次 AI 任务(查词 / 本页解析 / 对话)都会各调一次,所以 random 是按任务随机,不是按会话。
+ */
 export async function resolveProvider(env: Env, userId: string | null): Promise<ProviderConfig | null> {
   const row = userId ? await loadAiSettings(env, userId).catch(() => null) : null;
-  return providerConfig(env, row, activeProvider(row));
+  const choice = activeChoice(row);
+  return choice === RANDOM_PROVIDER ? randomConfig(env, row) : providerConfig(env, row, choice);
 }
 
 /** 单次调用的延迟日志(AI 统计页用),失败不影响主流程 */

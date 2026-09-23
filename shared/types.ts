@@ -123,6 +123,9 @@ export interface Stats {
 
 export type AiProviderId = "openai" | "deepseek";
 
+/** 设置页选的「用哪家」:某一家,或 random —— 每次 AI 调用在配了 key 的提供商里随机挑一家 */
+export type AiProviderChoice = AiProviderId | "random";
+
 /** 记录延迟时用的调用场景 */
 export type AiCallKind = "explain_word" | "analyze_page" | "chat" | "telegram";
 
@@ -137,8 +140,8 @@ export interface AiProviderInfo {
 }
 
 export interface AiSettings {
-  provider: AiProviderId;
-  model: string;        // 当前生效的模型
+  provider: AiProviderChoice;
+  model: string;        // 当前生效的模型;random 时为空串(各家各用自己的默认模型)
   providers: AiProviderInfo[];
 }
 
