@@ -720,3 +720,46 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
   /* 手机上没有 hover,删除/编辑按钮直接常显 */
   .book-del, .book-edit { opacity: 1; }
 }
+
+/* ---------- 设置页 / AI 统计页 ---------- */
+
+.lib-brand { text-decoration: none; color: inherit; }
+.settings-card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; max-width: 620px;
+}
+.settings-saved { font-size: 13px; color: var(--good); display: inline-flex; align-items: center; gap: 5px; }
+.settings-providers { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.provider-pick {
+  flex: 1; min-width: 180px; text-align: left; cursor: pointer;
+  background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 3px; transition: all 0.15s;
+}
+.provider-pick:hover:not(:disabled) { border-color: var(--primary); }
+.provider-pick.active { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.provider-pick:disabled { opacity: 0.6; cursor: default; }
+.provider-name { font-family: var(--serif); font-size: 15px; font-weight: 600; }
+.provider-key { font-size: 12px; }
+.provider-key.ok { color: var(--good); }
+.provider-key.missing { color: var(--danger); }
+.settings-warn {
+  margin-top: 10px; font-size: 12.5px; color: #8a6d00;
+  background: #f6efd9; border: 1px solid #ecdca0; border-radius: 8px; padding: 8px 10px;
+}
+.settings-key-row { padding: 8px 0; }
+.settings-key-input { display: flex; gap: 8px; margin-top: 4px; }
+.settings-key-input input {
+  flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff;
+}
+
+.ai-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ai-table th {
+  text-align: left; font-weight: 600; color: var(--muted); font-size: 12px;
+  padding: 4px 8px 8px 0; border-bottom: 1px solid var(--border);
+}
+.ai-table td { padding: 7px 8px 7px 0; border-bottom: 1px dashed var(--border); vertical-align: middle; }
+.ai-table tr:last-child td { border-bottom: none; }
+.ai-bar-cell { width: 28%; }
+.ai-bar { display: block; height: 8px; border-radius: 4px; background: var(--primary); }
+.ai-failed { color: var(--danger); font-size: 12px; }
+.ai-note { margin: 10px 0 0; }

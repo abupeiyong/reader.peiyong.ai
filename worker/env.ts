@@ -10,6 +10,10 @@ export interface Env {
   OPENAI_API_KEY?: string;
   OPENAI_BASE_URL?: string;   // 默认 https://api.openai.com/v1;可指向兼容网关
   OPENAI_CHAT_MODEL?: string; // 默认 gpt-5-nano
+  // DeepSeek(同为 OpenAI 兼容协议);设置页可切换到它,key 也可在设置页填
+  DEEPSEEK_API_KEY?: string;
+  DEEPSEEK_BASE_URL?: string;   // 默认 https://api.deepseek.com/v1
+  DEEPSEEK_CHAT_MODEL?: string; // 默认 deepseek-chat
   // ElevenLabs TTS(eleven_v3);未配置则回退 Workers AI melotts → 浏览器合成
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_MODEL_ID?: string;   // 默认 eleven_v3

@@ -119,6 +119,61 @@ export interface Stats {
   vocab_trend: VocabSnapshot[];
 }
 
+// ---------- AI 提供商设置与调用统计 ----------
+
+export type AiProviderId = "openai" | "deepseek";
+
+/** 记录延迟时用的调用场景 */
+export type AiCallKind = "explain_word" | "analyze_page" | "chat" | "telegram";
+
+export interface AiProviderInfo {
+  id: AiProviderId;
+  label: string;
+  models: string[];
+  default_model: string;
+  key_set: boolean;
+  key_source: "user" | "env" | null; // user = 设置页填的;env = 部署时的 secret
+  key_hint: string;                  // 末 4 位(如 "…3f9a");没有 key 时为空串
+}
+
+export interface AiSettings {
+  provider: AiProviderId;
+  model: string;        // 当前生效的模型
+  providers: AiProviderInfo[];
+}
+
+export interface AiLatencyGroup {
+  provider: string;
+  model: string;
+  kind: AiCallKind | "all";
+  calls: number;
+  ok_calls: number;
+  avg_ms: number;
+  p50_ms: number;
+  p95_ms: number;
+  min_ms: number;
+  max_ms: number;
+  last_at: number;
+}
+
+export interface AiCallLog {
+  provider: string;
+  model: string;
+  kind: string;
+  latency_ms: number;
+  ok: number;
+  stream: number;
+  created_at: number;
+}
+
+export interface AiStats {
+  days: number;
+  total_calls: number;
+  by_model: AiLatencyGroup[];
+  by_kind: AiLatencyGroup[];
+  recent: AiCallLog[];
+}
+
 /** 每日阅读目标:3 小时 */
 export const DAILY_GOAL_MS = 3 * 60 * 60 * 1000;
 

@@ -4,6 +4,8 @@ import type { User } from "../shared/types";
 import LoginPage from "./pages/LoginPage";
 import LibraryPage from "./pages/LibraryPage";
 import ReaderPage from "./pages/ReaderPage";
+import SettingsPage from "./pages/SettingsPage";
+import AiStatsPage from "./pages/AiStatsPage";
 
 function useHashRoute(): string {
   const [hash, setHash] = useState(location.hash || "#/");
@@ -51,5 +53,7 @@ export default function App() {
   if (readMatch) {
     return <ReaderPage key={readMatch[1]} bookId={readMatch[1]} user={user} onUserChange={setUser} />;
   }
+  if (hash.startsWith("#/settings")) return <SettingsPage />;
+  if (hash.startsWith("#/ai-stats")) return <AiStatsPage />;
   return <LibraryPage user={user} onUserChange={setUser} />;
 }
