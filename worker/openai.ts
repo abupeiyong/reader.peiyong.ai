@@ -19,17 +19,26 @@ interface ChatOpts {
   verbosity?: "low" | "medium" | "high";
 }
 
+/** 各推理档位下 max_completion_tokens 的下限:推理本身要花的 token 越多,正文越容易被挤没 */
+const REASONING_FLOOR: Record<"minimal" | "low" | "medium" | "high", number> = {
+  minimal: 0,
+  low: 1500,
+  medium: 3000,
+  high: 6000,
+};
+
 /** 按模型拼请求体:推理模型与普通模型的 token / 推理参数不同名 */
 function chatBody(cfg: ProviderConfig, messages: Msg[], opts: ChatOpts, stream: boolean) {
   // gpt-5 系列为推理模型:用 max_completion_tokens,并以 minimal 推理换取低延迟
   const gpt5 = /^gpt-5/.test(cfg.model);
   // deepseek-reasoner 不支持 JSON 模式;没有 response_format 时靠 extractJson 兜底解析
   const jsonMode = opts.json && !/^deepseek-reasoner/.test(cfg.model);
-  // 显式开了思考才上调推理档;默认(含关闭)保持 minimal —— 低延迟是这几个场景的前提
-  const effort = cfg.thinking === true ? "low" : "minimal";
-  // 推理会先吃掉一部分 token 预算,开着思考时给正文留足余量,
+  // 思考档位直接就是 gpt-5 的 reasoning_effort;off 和「没给档位」都保持 minimal
+  // —— 低延迟是这几个场景的前提。
+  const effort = cfg.thinkLevel && cfg.thinkLevel !== "off" ? cfg.thinkLevel : "minimal";
+  // 推理会先吃掉一部分 token 预算,档位越高吃得越多。开着思考时给正文留足余量,
   // 否则查词这种短预算(500)可能全被推理花光,换回 200 + 空内容。
-  const maxTokens = Math.max(opts.maxTokens ?? 1024, cfg.thinking === true ? 1500 : 0);
+  const maxTokens = Math.max(opts.maxTokens ?? 1024, REASONING_FLOOR[effort]);
   return {
     model: cfg.model,
     messages,

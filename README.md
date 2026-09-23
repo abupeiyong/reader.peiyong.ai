@@ -25,8 +25,9 @@
 - 每家 key 旁的 `Test` 按钮做连接自检:真发一条最短请求,把提供商返回的 HTTP 状态与
   错误原文显示出来(平时调用失败会静默回退 Workers AI → mock,看不出到底哪里不对);
   提供商返回 200 但内容为空(DeepSeek 的 JSON 模式偶发)同样算失败,照常回退并记为失败调用
-- 查词默认关掉模型的「思考」(设置页 Word lookups 可开):gpt-5 系列走最低推理档,
-  DeepSeek 把 `deepseek-reasoner` 换成 `deepseek-chat`;只影响查词,本页解析与对话不变
+- 查词的「思考」分四档(设置页 Word lookups → Thinking level:off / low / medium / high,默认 off):
+  gpt-5 系列把档位直接当 `reasoning_effort`(off = 最低档),DeepSeek 只分思不思考 —— off 时把
+  `deepseek-reasoner` 换成 `deepseek-chat`;只影响查词,本页解析与对话不变
 - AI 统计页(`#/ai-stats`)按提供商/模型对比响应延迟(中位数/均值/p95;流式对话记首个 token 的延迟)
 - 语境化查词:音标、词性、释义、语境含义、搭配、词形、例句 —— 全部保存供复习
 - 本页解析:生词、短语、长难句、背景知识
@@ -61,8 +62,8 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 
 ## 开发 / 部署
 - 本地:`npm run dev`(用 `wrangler.dev.jsonc`,无 AI 绑定 → 离线 mock)
-- 部署:`npm run deploy`;迁移 0001–0013(`npm run db:migrate:remote`)
-  —— 0011 / 0012 / 0013 漏跑时 AI 设置/统计接口会在首次报「列/表不存在」时自行补建,不至于整页打不开
+- 部署:`npm run deploy`;迁移 0001–0014(`npm run db:migrate:remote`)
+  —— 0011 / 0012 / 0013 / 0014 漏跑时 AI 设置/统计接口会在首次报「列/表不存在」时自行补建,不至于整页打不开
 - Secret:`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`(可选,也可在设置页填)、`ELEVENLABS_API_KEY`、`TELEGRAM_BOT_TOKEN`、
   `TELEGRAM_WEBHOOK_SECRET`、`TELEGRAM_OWNER_CHAT_ID`(可选,限定唯一可登录的 chat)
 - 本地开发(`APP_ENV != production`)保留邮箱直登,供 e2e 用;生产环境自动禁用
@@ -76,6 +77,6 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 worker/    Hono API + auth.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / telegram.ts / vocabmodel.ts
 src/       React 前端(pages/ 页面,components/ 组件,lib/ PDF·TTS·录音·TOC)
 shared/    前后端共享类型
-migrations/ D1 迁移(0001 MVP … 0013 每家各存一个已选模型)
+migrations/ D1 迁移(0001 MVP … 0014 查词思考档位)
 scripts/   Playwright 端到端自测(scripts/e2e.mjs)
 ```

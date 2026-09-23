@@ -7,7 +7,8 @@
 import type { Env } from "./env";
 import { openaiListModels } from "./openai";
 import { now } from "./util";
-import type { AiCallKind, AiProviderChoice, AiProviderId } from "../shared/types";
+import { THINK_LEVELS } from "../shared/types";
+import type { AiCallKind, AiProviderChoice, AiProviderId, ThinkLevel } from "../shared/types";
 
 interface Spec {
   label: string;
@@ -51,16 +52,20 @@ export function isProviderChoice(v: unknown): v is AiProviderChoice {
   return v === RANDOM_PROVIDER || isProviderId(v);
 }
 
+export function isThinkLevel(v: unknown): v is ThinkLevel {
+  return typeof v === "string" && (THINK_LEVELS as readonly string[]).includes(v);
+}
+
 export interface ProviderConfig {
   provider: AiProviderId;
   model: string;
   apiKey: string;
   baseUrl: string;
   /**
-   * 这次调用是否允许模型先「思考」(推理)。
+   * 这次调用允许模型「思考」到哪一档(推理)。
    * undefined = 沿用各场景原有的默认(最低推理档),只有查词会显式给值。
    */
-  thinking?: boolean;
+  thinkLevel?: ThinkLevel;
 }
 
 /** users 表里与 AI 提供商相关的几列 */
@@ -72,10 +77,12 @@ export interface AiSettingsRow {
   ai_model_deepseek: string | null;
   openai_api_key: string | null;
   deepseek_api_key: string | null;
+  /** 迁移 0014 之前的开关;现在只当老数据的兜底读,不再写 */
   ai_word_thinking: number | null;
+  ai_word_think_level: string | null;
 }
 
-// 迁移 0011 / 0012 / 0013 的兜底:部署了新代码但 `npm run db:migrate:remote` 没跑到时,
+// 迁移 0011 / 0012 / 0013 / 0014 的兜底:部署了新代码但 `npm run db:migrate:remote` 没跑到时,
 // 这些列/表不存在,设置页和统计页会直接 500(前端只剩一个转不完的 Loading)。
 // 下面的语句只在查询报「列/表不存在」时执行一次,已迁移过的库上永远不会触发。
 const AI_SCHEMA_SQL = [
@@ -86,6 +93,7 @@ const AI_SCHEMA_SQL = [
   "ALTER TABLE users ADD COLUMN openai_api_key TEXT",
   "ALTER TABLE users ADD COLUMN deepseek_api_key TEXT",
   "ALTER TABLE users ADD COLUMN ai_word_thinking INTEGER",
+  "ALTER TABLE users ADD COLUMN ai_word_think_level TEXT",
   `CREATE TABLE IF NOT EXISTS ai_calls (
      id INTEGER PRIMARY KEY AUTOINCREMENT,
      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
@@ -129,7 +137,7 @@ export function loadAiSettings(env: Env, userId: string): Promise<AiSettingsRow 
   return withAiSchema(env, () =>
     env.DB.prepare(
       `SELECT ai_provider, ai_model, ai_model_openai, ai_model_deepseek,
-              openai_api_key, deepseek_api_key, ai_word_thinking
+              openai_api_key, deepseek_api_key, ai_word_thinking, ai_word_think_level
          FROM users WHERE id = ?`
     )
       .bind(userId)
@@ -241,11 +249,16 @@ function randomConfig(env: Env, row: AiSettingsRow | null): ProviderConfig | nul
 }
 
 /** 查词默认不让模型思考:查词看的是「多久出结果」,推理那几秒的代价远大于收益 */
-export const DEFAULT_WORD_THINKING = false;
+export const DEFAULT_WORD_THINK_LEVEL: ThinkLevel = "off";
 
-/** 设置页的「查词时让模型思考」开关;没设过(NULL)按默认算 */
-export function wordThinking(row: AiSettingsRow | null): boolean {
-  return row?.ai_word_thinking == null ? DEFAULT_WORD_THINKING : row.ai_word_thinking === 1;
+/**
+ * 设置页选的「查词思考档位」;没设过(NULL)按默认算。
+ * 迁移 0014 之前只有开关列 ai_word_thinking,老数据的「开」当 low 读。
+ */
+export function wordThinkLevel(row: AiSettingsRow | null): ThinkLevel {
+  if (isThinkLevel(row?.ai_word_think_level)) return row.ai_word_think_level;
+  if (row?.ai_word_thinking != null) return row.ai_word_thinking === 1 ? "low" : "off";
+  return DEFAULT_WORD_THINK_LEVEL;
 }
 
 /** 关思考时需要换模型的提供商:DeepSeek 的推理模型没有开关参数,只能换成非推理的那个 */
@@ -254,15 +267,16 @@ const NON_THINKING_SWAP: Partial<Record<AiProviderId, { thinks: RegExp; model: s
 };
 
 /**
- * 把「这次让不让模型思考」落到具体配置上:
+ * 把「这次思考到哪一档」落到具体配置上:
  * - OpenAI(gpt-5 系列)靠 reasoning_effort 调档,模型不变(见 openai.ts 的 chatBody);
- * - DeepSeek 没有这种参数,只能把 deepseek-reasoner 换成 deepseek-chat。
- * thinking 为 undefined(查词以外的场景)时不做任何改动。
+ * - DeepSeek 没有这种参数,只分「思不思考」:off 时把 deepseek-reasoner 换成 deepseek-chat,
+ *   其余档位都保持 reasoner(它的推理深度不可调)。
+ * level 为 undefined(查词以外的场景)时不做任何改动。
  */
-export function applyThinking(cfg: ProviderConfig, thinking: boolean | undefined): ProviderConfig {
+export function applyThinking(cfg: ProviderConfig, level: ThinkLevel | undefined): ProviderConfig {
   const swap = NON_THINKING_SWAP[cfg.provider];
-  const model = thinking === false && swap?.thinks.test(cfg.model) ? swap.model : cfg.model;
-  return { ...cfg, model, thinking };
+  const model = level === "off" && swap?.thinks.test(cfg.model) ? swap.model : cfg.model;
+  return { ...cfg, model, thinkLevel: level };
 }
 
 /**
@@ -278,7 +292,7 @@ export async function resolveProvider(
   const row = userId ? await loadAiSettings(env, userId).catch(() => null) : null;
   const choice = activeChoice(row);
   const cfg = choice === RANDOM_PROVIDER ? randomConfig(env, row) : providerConfig(env, row, choice);
-  return cfg && applyThinking(cfg, kind === "explain_word" ? wordThinking(row) : undefined);
+  return cfg && applyThinking(cfg, kind === "explain_word" ? wordThinkLevel(row) : undefined);
 }
 
 /** 单次调用的延迟日志(AI 统计页用),失败不影响主流程 */
