@@ -66,18 +66,23 @@ export interface ProviderConfig {
 /** users 表里与 AI 提供商相关的几列 */
 export interface AiSettingsRow {
   ai_provider: string | null;
+  /** 迁移 0013 之前的单列模型;现在只当老数据的兜底读,不再写 */
   ai_model: string | null;
+  ai_model_openai: string | null;
+  ai_model_deepseek: string | null;
   openai_api_key: string | null;
   deepseek_api_key: string | null;
   ai_word_thinking: number | null;
 }
 
-// 迁移 0011 / 0012 的兜底:部署了新代码但 `npm run db:migrate:remote` 没跑到时,
+// 迁移 0011 / 0012 / 0013 的兜底:部署了新代码但 `npm run db:migrate:remote` 没跑到时,
 // 这些列/表不存在,设置页和统计页会直接 500(前端只剩一个转不完的 Loading)。
 // 下面的语句只在查询报「列/表不存在」时执行一次,已迁移过的库上永远不会触发。
 const AI_SCHEMA_SQL = [
   "ALTER TABLE users ADD COLUMN ai_provider TEXT",
   "ALTER TABLE users ADD COLUMN ai_model TEXT",
+  "ALTER TABLE users ADD COLUMN ai_model_openai TEXT",
+  "ALTER TABLE users ADD COLUMN ai_model_deepseek TEXT",
   "ALTER TABLE users ADD COLUMN openai_api_key TEXT",
   "ALTER TABLE users ADD COLUMN deepseek_api_key TEXT",
   "ALTER TABLE users ADD COLUMN ai_word_thinking INTEGER",
@@ -123,7 +128,9 @@ export async function withAiSchema<T>(env: Env, run: () => Promise<T>): Promise<
 export function loadAiSettings(env: Env, userId: string): Promise<AiSettingsRow | null> {
   return withAiSchema(env, () =>
     env.DB.prepare(
-      "SELECT ai_provider, ai_model, openai_api_key, deepseek_api_key, ai_word_thinking FROM users WHERE id = ?"
+      `SELECT ai_provider, ai_model, ai_model_openai, ai_model_deepseek,
+              openai_api_key, deepseek_api_key, ai_word_thinking
+         FROM users WHERE id = ?`
     )
       .bind(userId)
       .first<AiSettingsRow>()
@@ -189,12 +196,29 @@ export async function providerModels(env: Env, row: AiSettingsRow | null, p: AiP
   return models;
 }
 
+/** 存这家选定模型的列名 */
+export function modelColumn(p: AiProviderId): string {
+  return p === "deepseek" ? "ai_model_deepseek" : "ai_model_openai";
+}
+
 /**
- * 当前生效的模型。ai_model 只在属于该提供商时才认:
+ * 设置页为这家选过的模型;没选过返回空串。
+ * 每家各存一列,所以换提供商(含切到 random)不会弄丢另一家的选择。
+ * 迁移 0013 之前的老数据只有单列 ai_model,它属于这家时仍然认。
+ */
+function userModel(row: AiSettingsRow | null, p: AiProviderId): string {
+  const chosen = ((p === "deepseek" ? row?.ai_model_deepseek : row?.ai_model_openai) ?? "").trim();
+  if (chosen) return chosen;
+  const legacy = (row?.ai_model ?? "").trim();
+  return legacy && ownsModel(p, legacy) ? legacy : "";
+}
+
+/**
+ * 当前生效的模型。选定的模型只在属于该提供商时才认:
  * 换提供商后残留的旧模型名不会被带过去(否则请求必然 400)。
  */
 export function activeModel(env: Env, row: AiSettingsRow | null, p: AiProviderId): string {
-  const chosen = (row?.ai_model ?? "").trim();
+  const chosen = userModel(row, p);
   return chosen && ownsModel(p, chosen) ? chosen : envModel(env, p);
 }
 

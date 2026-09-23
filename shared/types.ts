@@ -133,6 +133,7 @@ export interface AiProviderInfo {
   id: AiProviderId;
   label: string;
   models: string[];   // 可选模型;DeepSeek 取自它 /models 的实时清单,问不到时为内置清单
+  model: string;      // 这家当前生效的模型:选过就是选的那个,没选过是 default_model
   default_model: string;
   key_set: boolean;
   key_source: "user" | "env" | null; // user = 设置页填的;env = 部署时的 secret
@@ -150,7 +151,7 @@ export interface AiProviderTest {
 
 export interface AiSettings {
   provider: AiProviderChoice;
-  model: string;        // 当前生效的模型;random 时为空串(各家各用自己的默认模型)
+  model: string;        // 当前生效的模型;random 时为空串(抽到哪家就用那家的 providers[].model)
   providers: AiProviderInfo[];
   /** 查词时是否让模型先「思考」(推理);默认 false —— 查词要的是快 */
   word_thinking: boolean;

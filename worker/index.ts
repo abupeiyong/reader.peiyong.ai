@@ -20,6 +20,7 @@ import {
   isProviderChoice,
   isProviderId,
   loadAiSettings,
+  modelColumn,
   providerConfig,
   providerModels,
   userKey,
@@ -585,7 +586,7 @@ api.get("/ai/settings", async (c) => {
   const models = await Promise.all(PROVIDER_IDS.map((id) => providerModels(c.env, row, id)));
   const body: AiSettings = {
     provider,
-    // random 没有「当前模型」:每家各用自己的 default_model
+    // random 没有单一的「当前模型」:抽到哪家就用哪家的 model
     model: provider === RANDOM_PROVIDER ? "" : activeModel(c.env, row, provider),
     providers: PROVIDER_IDS.map((id, i) => {
       const fromUser = userKey(row, id);
@@ -595,6 +596,7 @@ api.get("/ai/settings", async (c) => {
         id,
         label: PROVIDERS[id].label,
         models: models[i],
+        model: activeModel(c.env, row, id),
         default_model: envModel(c.env, id),
         key_set: Boolean(key),
         key_source: fromUser ? "user" : fromEnv ? "env" : null,
@@ -623,30 +625,23 @@ api.post("/ai/settings", async (c) => {
   if (body.word_thinking !== undefined && typeof body.word_thinking !== "boolean") {
     return c.json({ error: "word_thinking 必须是布尔值" }, 400);
   }
-  const current = activeChoice(row);
-  const target = isProviderChoice(body.provider) ? body.provider : current;
-  if (body.model !== undefined) {
-    if (target === RANDOM_PROVIDER) {
-      return c.json({ error: "随机模式下各家用自己的默认模型,不能指定模型" }, 400);
-    }
-    if (!(await providerModels(c.env, row, target)).includes(body.model)) {
-      return c.json({ error: `${PROVIDERS[target].label} 不支持模型 ${body.model}` }, 400);
-    }
-  }
+  const target = isProviderChoice(body.provider) ? body.provider : activeChoice(row);
 
   const sets: string[] = [];
   const vals: unknown[] = [];
   if (body.provider !== undefined) {
     sets.push("ai_provider = ?");
     vals.push(target);
-    // 换提供商时清掉旧模型,避免把上一家的模型名带过去(切到 random 同理:回到各家默认)
-    if (body.model === undefined && target !== current) {
-      sets.push("ai_model = ?");
-      vals.push(null);
-    }
   }
+  // 模型记在这家自己的列上:换提供商(含切到 random)不会弄丢已选的模型
   if (body.model !== undefined) {
-    sets.push("ai_model = ?");
+    if (target === RANDOM_PROVIDER) {
+      return c.json({ error: "随机模式下抽到哪家就用哪家已选的模型,不能在这里指定模型" }, 400);
+    }
+    if (!(await providerModels(c.env, row, target)).includes(body.model)) {
+      return c.json({ error: `${PROVIDERS[target].label} 不支持模型 ${body.model}` }, 400);
+    }
+    sets.push(`${modelColumn(target)} = ?`);
     vals.push(body.model);
   }
   if (body.word_thinking !== undefined) {
