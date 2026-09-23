@@ -1,11 +1,20 @@
 // 设置页:选 AI 提供商(OpenAI / DeepSeek / Random)、模型,填各家的 API key,
-// 以及查词时要不要让模型「思考」(默认关,查词图的是快)。
+// 以及查词时让模型「思考」到哪一档(默认 off,查词图的是快)。
 // Random = 每次 AI 任务在「填了 key 的提供商」里随机挑一家,各家用自己那份已选模型。
 // key 保存后不再回显明文,只显示末 4 位;留空保存 = 清除,回退部署时配置的 secret。
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { AiProviderInfo, AiProviderTest, AiSettings } from "../../shared/types";
+import { THINK_LEVELS } from "../../shared/types";
+import type { AiProviderInfo, AiProviderTest, AiSettings, ThinkLevel } from "../../shared/types";
 import { Icon } from "../components/Icon";
+
+/** 查词思考档位的显示文案;档位本身就是 gpt-5 的 reasoning_effort */
+const THINK_LEVEL_LABELS: Record<ThinkLevel, string> = {
+  off: "Off — fastest (default)",
+  low: "Low",
+  medium: "Medium",
+  high: "High — slowest",
+};
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AiSettings | null>(null);
@@ -237,24 +246,30 @@ export default function SettingsPage() {
                 <b>Word lookups</b>
               </div>
               <p className="tg-desc">
-                Looking up a word skips the model's thinking step by default, so the popover comes back as fast as the
-                model can write. Turn it on to trade that speed for a reasoning pass: gpt-5 models switch to low
-                reasoning effort, and DeepSeek keeps deepseek-reasoner instead of falling back to deepseek-chat. Page
-                analysis and chat are not affected.
+                How long the model may think before explaining a word. Off is the default, so the popover comes back as
+                fast as the model can write; every other level trades that speed for a reasoning pass. gpt-5 models map
+                the level straight to reasoning effort, while DeepSeek only knows think or not — Off swaps
+                deepseek-reasoner for deepseek-chat, any other level keeps the reasoner. Page analysis and chat are not
+                affected.
               </p>
               <label className="tg-row">
-                <input
-                  type="checkbox"
-                  checked={settings.word_thinking}
+                <span>Thinking level</span>
+                <select
+                  value={settings.word_think_level}
                   disabled={busy}
                   onChange={(e) =>
                     save(
-                      { word_thinking: e.target.checked },
-                      e.target.checked ? "Thinking on for lookups" : "Thinking off for lookups"
+                      { word_think_level: e.target.value },
+                      `Lookup thinking: ${THINK_LEVEL_LABELS[e.target.value as ThinkLevel]}`
                     )
                   }
-                />
-                <span>Let the model think before explaining a word</span>
+                >
+                  {THINK_LEVELS.map((level) => (
+                    <option key={level} value={level}>
+                      {THINK_LEVEL_LABELS[level]}
+                    </option>
+                  ))}
+                </select>
               </label>
             </section>
           </>

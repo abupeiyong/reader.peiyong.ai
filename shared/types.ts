@@ -129,6 +129,13 @@ export type AiProviderChoice = AiProviderId | "random";
 /** 记录延迟时用的调用场景 */
 export type AiCallKind = "explain_word" | "analyze_page" | "chat" | "telegram";
 
+/**
+ * 查词时让模型「思考」多久。off = 不思考(默认,查词要的是快),
+ * 其余三档直接对应 gpt-5 的 reasoning_effort;落地见 worker/aiprovider.ts。
+ */
+export const THINK_LEVELS = ["off", "low", "medium", "high"] as const;
+export type ThinkLevel = (typeof THINK_LEVELS)[number];
+
 export interface AiProviderInfo {
   id: AiProviderId;
   label: string;
@@ -153,8 +160,8 @@ export interface AiSettings {
   provider: AiProviderChoice;
   model: string;        // 当前生效的模型;random 时为空串(抽到哪家就用那家的 providers[].model)
   providers: AiProviderInfo[];
-  /** 查词时是否让模型先「思考」(推理);默认 false —— 查词要的是快 */
-  word_thinking: boolean;
+  /** 查词时让模型思考到哪一档;默认 "off" —— 查词要的是快 */
+  word_think_level: ThinkLevel;
 }
 
 export interface AiLatencyGroup {
