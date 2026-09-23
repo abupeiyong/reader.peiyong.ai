@@ -45,8 +45,25 @@ function chatHeaders(cfg: ProviderConfig): Record<string, string> {
   return { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` };
 }
 
-/** 非流式:返回助手文本;失败返回 null 让上层回退 */
-export async function openaiChat(cfg: ProviderConfig, messages: Msg[], opts: ChatOpts = {}): Promise<string | null> {
+/** 从 {"error":{"message":"..."}} 里取人能看懂的那句;取不到就用原始正文 */
+function apiErrorMessage(body: string): string {
+  try {
+    const e = (JSON.parse(body) as { error?: { message?: string } | string }).error;
+    const msg = typeof e === "string" ? e : e?.message;
+    if (msg) return msg;
+  } catch {
+    /* 非 JSON 正文,原样返回 */
+  }
+  return body.slice(0, 200) || "(无响应正文)";
+}
+
+/** 一次非流式调用的结果;text 为 null 时 error 是可以展示给用户的失败原因 */
+interface ChatResult {
+  text: string | null;
+  error: string | null;
+}
+
+async function chatOnce(cfg: ProviderConfig, messages: Msg[], opts: ChatOpts): Promise<ChatResult> {
   try {
     const res = await fetch(chatUrl(cfg), {
       method: "POST",
@@ -54,15 +71,39 @@ export async function openaiChat(cfg: ProviderConfig, messages: Msg[], opts: Cha
       body: JSON.stringify(chatBody(cfg, messages, opts, false)),
     });
     if (!res.ok) {
-      console.warn(`${cfg.provider} chat 失败:`, res.status, (await res.text()).slice(0, 300));
-      return null;
+      const body = (await res.text().catch(() => "")).slice(0, 300);
+      console.warn(`${cfg.provider} chat 失败:`, res.status, body);
+      return { text: null, error: `HTTP ${res.status}:${apiErrorMessage(body)}` };
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    return data.choices?.[0]?.message?.content ?? null;
+    const text = data.choices?.[0]?.message?.content ?? "";
+    // DeepSeek 的 JSON 模式有概率返回 200 + 空 content。空内容当失败处理,否则
+    // 上层拿到空串既不会回退 Workers AI(只在 null 时回退),又会被记成一次成功调用。
+    if (!text.trim()) {
+      console.warn(`${cfg.provider} chat 返回空内容:`, cfg.model);
+      return { text: null, error: `${cfg.model} 返回了空内容` };
+    }
+    return { text, error: null };
   } catch (e) {
     console.warn(`${cfg.provider} chat 异常:`, (e as Error).message);
-    return null;
+    return { text: null, error: (e as Error).message };
   }
+}
+
+/** 非流式:返回助手文本;失败(含返回空内容)返回 null 让上层回退 */
+export async function openaiChat(cfg: ProviderConfig, messages: Msg[], opts: ChatOpts = {}): Promise<string | null> {
+  return (await chatOnce(cfg, messages, opts)).text;
+}
+
+/**
+ * 设置页自检:用当前 key/模型真发一条最短请求,把提供商的原话带回去。
+ * 平时调用失败只会静默回退到 Workers AI → mock,原因只留在 Worker 日志里,
+ * 页面上看不出「为什么这家不可用」。成功返回 null,失败返回原因。
+ */
+export async function openaiProbe(cfg: ProviderConfig): Promise<string | null> {
+  const messages: Msg[] = [{ role: "user", content: "Reply with the single word: ok" }];
+  // 256 而不是十几个:gpt-5 / deepseek-reasoner 会先花掉一部分预算做推理
+  return (await chatOnce(cfg, messages, { maxTokens: 256 })).error;
 }
 
 /** 流式:返回纯文本 chunk 流;不可用返回 null 让上层回退 */

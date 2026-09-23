@@ -3,12 +3,14 @@
 // key 保存后不再回显明文,只显示末 4 位;留空保存 = 清除,回退部署时配置的 secret。
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { AiSettings } from "../../shared/types";
+import type { AiProviderTest, AiSettings } from "../../shared/types";
 import { Icon } from "../components/Icon";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AiSettings | null>(null);
   const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
+  // 每家最近一次「Test」的结果;"busy" = 正在自检
+  const [tests, setTests] = useState<Record<string, AiProviderTest | "busy">>({});
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState("");
   const [err, setErr] = useState("");
@@ -37,6 +39,20 @@ export default function SettingsPage() {
       setErr((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  // 自检:真向这家发一条最短请求,把它返回的失败原因显示出来
+  const test = async (id: string) => {
+    setTests((t) => ({ ...t, [id]: "busy" }));
+    try {
+      const r = await api.post<AiProviderTest>("/api/ai/test", { provider: id });
+      setTests((t) => ({ ...t, [id]: r }));
+    } catch (e) {
+      setTests((t) => ({
+        ...t,
+        [id]: { provider: id as AiProviderTest["provider"], model: "", ok: false, latency_ms: 0, error: (e as Error).message },
+      }));
     }
   };
 
@@ -194,7 +210,16 @@ export default function SettingsPage() {
                     >
                       Save
                     </button>
+                    <button
+                      className="btn btn-ghost"
+                      disabled={busy || tests[p.id] === "busy"}
+                      onClick={() => void test(p.id)}
+                      title="Send one tiny request and show what the provider answers"
+                    >
+                      {tests[p.id] === "busy" ? "Testing…" : "Test"}
+                    </button>
                   </div>
+                  {tests[p.id] && tests[p.id] !== "busy" && <TestResult result={tests[p.id] as AiProviderTest} />}
                 </div>
               ))}
             </section>
@@ -202,5 +227,21 @@ export default function SettingsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+/** 自检结果:成功显示模型 + 往返耗时,失败把提供商的原话照抄出来 */
+function TestResult({ result }: { result: AiProviderTest }) {
+  if (result.ok) {
+    return (
+      <p className="settings-test ok">
+        <Icon name="check" /> {result.model} replied in {result.latency_ms} ms
+      </p>
+    );
+  }
+  return (
+    <p className="settings-test bad">
+      <Icon name="x" /> {result.error}
+    </p>
   );
 }
