@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { VocabItem, WordExplanation } from "../../shared/types";
+import { fmtInterval, untilDue } from "../../shared/srs";
 import { speakWord } from "../lib/speech";
 import { Icon } from "./Icon";
 
@@ -77,6 +78,7 @@ export default function VocabTab({ refreshNonce, onKnownWord, onStartReview }: P
                     {item.context_sentence && <div className="vocab-context">“{item.context_sentence}”</div>}
                     {exp && <div className="wp-context">{exp.meaning_in_context}</div>}
                     {item.page_no != null && <div className="wp-small">From page {item.page_no}</div>}
+                    <div className="wp-small">{reviewLine(item)}</div>
                     <div className="vocab-actions">
                       {item.status !== "known" && (
                         <button className="link-btn" onClick={() => setStatus(item, "known")}>Mark mastered</button>
@@ -98,6 +100,14 @@ export default function VocabTab({ refreshNonce, onKnownWord, onStartReview }: P
       ))}
     </div>
   );
+}
+
+/** 该词的复习进度:复习了几次、下次什么时候 —— 让复习结果在生词本里看得见 */
+function reviewLine(item: VocabItem): string {
+  if (item.status === "known") return "Mastered · no longer in the review queue";
+  const head = item.reps ? `Reviewed ${item.reps}× · interval ${fmtInterval(item.interval_days)}` : "Not reviewed yet";
+  const left = untilDue(item.due_at, Date.now());
+  return `${head} · ${left ? `next review in ${left}` : "due now"}`;
 }
 
 // 按收藏日期(本地)分组,日期降序;当天/昨天用友好标签

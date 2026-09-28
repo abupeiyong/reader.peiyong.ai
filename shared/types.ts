@@ -52,6 +52,12 @@ export interface VocabItem {
   status: "learning" | "known" | "review";
   created_at: number;
   updated_at: number;
+  // SM-2 复习状态(0002 迁移加的列);NULL 的 due_at 表示新词、立即可复习
+  due_at: number | null;
+  interval_days: number;
+  ease: number;
+  reps: number;
+  last_review: number | null;
 }
 
 export interface ChatMessage {
@@ -67,8 +73,16 @@ export type ChatScope = "selection" | "page" | "document";
 // ---------- 二期 ----------
 
 export interface ReviewQueue {
-  items: (VocabItem & { due_at: number | null; interval_days: number; ease: number; reps: number })[];
+  items: VocabItem[];
   due_count: number;
+}
+
+/** POST /api/review/:id 的返回:落库后的下次复习安排 */
+export interface ReviewResult {
+  ok: true;
+  due_at: number;
+  interval_days: number;
+  graduated: boolean;
 }
 
 export interface DayStat {

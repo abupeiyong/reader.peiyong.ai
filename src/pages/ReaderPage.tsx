@@ -722,7 +722,7 @@ export default function ReaderPage({
             setShowReview(false);
             setVocabNonce((n) => n + 1);
           }}
-          onChanged={() => {}}
+          onChanged={() => setVocabNonce((n) => n + 1)}
         />
       )}
 
