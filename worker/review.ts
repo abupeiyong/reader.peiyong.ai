@@ -2,7 +2,7 @@
 // 网页端 /api/review/:id 与 Telegram 卡片按钮共用同一套规则,避免两处算出不同的下次复习时间。
 import type { Env } from "./env";
 import { now } from "./util";
-import { applyReview, type ReviewGrade } from "./vocabmodel";
+import { applyReview, type ReviewGrade } from "../shared/srs";
 
 export interface GradeOutcome {
   due_at: number;

@@ -99,38 +99,3 @@ export function hintsForText(text: string, opts: HintOptions): string[] {
   scored.sort((a, b) => b.p - a.p);
   return scored.slice(0, maxHints).map((s) => s.word);
 }
-
-// ---------- SM-2 间隔重复 ----------
-
-export type ReviewGrade = "again" | "hard" | "good" | "easy";
-
-export interface SrsState {
-  interval_days: number;
-  ease: number;
-  reps: number;
-}
-
-export function applyReview(s: SrsState, grade: ReviewGrade, now: number): SrsState & { due_at: number } {
-  let { interval_days: interval, ease, reps } = s;
-  switch (grade) {
-    case "again":
-      ease = Math.max(1.3, ease - 0.2);
-      reps = 0;
-      interval = 0;
-      return { interval_days: interval, ease, reps, due_at: now + 10 * 60 * 1000 }; // 10 分钟后重来
-    case "hard":
-      ease = Math.max(1.3, ease - 0.15);
-      interval = Math.max(1, interval * 1.2);
-      break;
-    case "good":
-      interval = reps === 0 ? 1 : interval * ease;
-      break;
-    case "easy":
-      ease = ease + 0.15;
-      interval = reps === 0 ? 2 : interval * ease * 1.3;
-      break;
-  }
-  interval = Math.min(interval, 365);
-  reps += 1;
-  return { interval_days: interval, ease, reps, due_at: now + interval * 24 * 3600 * 1000 };
-}

@@ -7,7 +7,7 @@ import { now } from "./util";
 import { issueLoginCode, chatAllowed } from "./logincode";
 import { speechMp3 } from "./tts";
 import { gradeVocab } from "./review";
-import type { ReviewGrade } from "./vocabmodel";
+import { fmtDay, fmtInterval, type ReviewGrade } from "../shared/srs";
 
 const API = "https://api.telegram.org";
 const DAILY_CARDS = 10; // 一天最多发几张卡,剩下的按到期顺序留到后面几天
@@ -323,16 +323,6 @@ async function sendReviewCards(env: Env, userId: string, chatId: string): Promis
 
 async function answerCallback(env: Env, id: string, text: string): Promise<void> {
   await call(env, "answerCallbackQuery", { callback_query_id: id, text }).catch(() => {});
-}
-
-function fmtInterval(days: number): string {
-  if (days < 1) return `${Math.max(1, Math.round(days * 24))}h`;
-  if (days < 30) return `${Math.round(days)}d`;
-  return `${Math.round(days / 30)}mo`;
-}
-
-function fmtDay(ts: number): string {
-  return new Date(ts).toISOString().slice(0, 10);
 }
 
 async function handleCallback(env: Env, cq: TgCallbackQuery): Promise<void> {

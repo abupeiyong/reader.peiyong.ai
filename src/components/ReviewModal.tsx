@@ -1,17 +1,25 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { ReviewQueue, WordExplanation } from "../../shared/types";
+import type { ReviewQueue, ReviewResult, VocabItem, WordExplanation } from "../../shared/types";
+import { AGAIN_DELAY_MS, applyReview, fmtInterval, type ReviewGrade } from "../../shared/srs";
 import { speakWord, prefetchWordAudio } from "../lib/speech";
 import { Icon } from "./Icon";
 
-type Item = ReviewQueue["items"][number];
+type Item = VocabItem;
 
-const GRADES: { key: "again" | "hard" | "good" | "easy"; label: string; hint: string; cls: string }[] = [
-  { key: "again", label: "Again", hint: "10 min", cls: "g-again" },
-  { key: "hard", label: "Hard", hint: "", cls: "g-hard" },
-  { key: "good", label: "Good", hint: "", cls: "g-good" },
-  { key: "easy", label: "Easy", hint: "", cls: "g-easy" },
+const GRADES: { key: ReviewGrade; label: string; cls: string }[] = [
+  { key: "again", label: "Again", cls: "g-again" },
+  { key: "hard", label: "Hard", cls: "g-hard" },
+  { key: "good", label: "Good", cls: "g-good" },
+  { key: "easy", label: "Easy", cls: "g-easy" },
 ];
+
+/** 刚打分那张卡的结果,打完立刻显示出来,让人看见评分确实记下了 */
+interface LastResult {
+  word: string;
+  label: string;
+  text: string;
+}
 
 export default function ReviewModal({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
   const [queue, setQueue] = useState<Item[]>([]);
@@ -22,12 +30,16 @@ export default function ReviewModal({ onClose, onChanged }: { onClose: () => voi
   const [graduated, setGraduated] = useState(0);
   const [exps, setExps] = useState<Record<string, WordExplanation>>({});
   const [expLoading, setExpLoading] = useState(false);
+  const [grading, setGrading] = useState(false);
+  const [last, setLast] = useState<LastResult | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    api.get<ReviewQueue>("/api/review/queue").then((q) => {
-      setQueue(q.items);
-      setLoading(false);
-    });
+    api
+      .get<ReviewQueue>("/api/review/queue")
+      .then((q) => setQueue(q.items))
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setLoading(false));
   }, []);
 
   const current = queue[idx];
@@ -55,23 +67,47 @@ export default function ReviewModal({ onClose, onChanged }: { onClose: () => voi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id]);
 
-  const grade = async (g: "again" | "hard" | "good" | "easy") => {
-    if (!current) return;
-    const res = await api.post<{ graduated: boolean }>(`/api/review/${current.id}`, { grade: g });
+  const grade = async (g: ReviewGrade) => {
+    if (!current || grading) return;
+    setGrading(true);
+    setError("");
+    let res: ReviewResult;
+    try {
+      res = await api.post<ReviewResult>(`/api/review/${current.id}`, { grade: g });
+    } catch (e) {
+      // 打分没落库时不要推进卡片,否则这次评分会被静默丢掉
+      setError(`未能保存评分:${(e as Error).message}`);
+      setGrading(false);
+      return;
+    }
+
+    const label = GRADES.find((x) => x.key === g)?.label ?? g;
+    setLast({
+      word: current.word,
+      label,
+      text: res.graduated ? "mastered, leaving the review queue 🎓" : `next review in ${fmtInterval(res.interval_days)}`,
+    });
     if (res.graduated) setGraduated((n) => n + 1);
     setDoneCount((n) => n + 1);
     setRevealed(false);
-    if (g === "again") {
-      // 重来的词挪到队尾
+
+    // 服务端与这里用同一套 SM-2 规则,本地同步一份新状态,按钮上的间隔预览才不会停在旧值
+    const next = { ...current, ...applyReview(current, g, Date.now()), due_at: res.due_at };
+    const moreLeft = queue.length - idx > 1;
+    if (g === "again" && moreLeft) {
+      // 重来的词挪到队尾,本轮还会再见一次
       setQueue((q) => {
         const copy = [...q];
-        const [item] = copy.splice(idx, 1);
-        copy.push(item);
+        copy.splice(idx, 1);
+        copy.push(next);
         return copy;
       });
     } else {
+      // 只剩这一张时不要原地重放(会卡住走不完),10 分钟后重新进队列
+      setQueue((q) => q.map((it, i) => (i === idx ? next : it)));
       setIdx((i) => i + 1);
     }
+    setGrading(false);
     onChanged();
   };
 
@@ -93,22 +129,28 @@ export default function ReviewModal({ onClose, onChanged }: { onClose: () => voi
         {finished && !loading && (
           <div className="review-body review-done">
             <div className="empty-icon"><Icon name="award" size={40} /></div>
-            {doneCount > 0 ? (
-              <p>Session complete! {doneCount} reviews done{graduated > 0 ? `, ${graduated} word(s) graduated to mastered` : ""}.</p>
-            ) : (
-              <p>No words are due for review. Save some new words while reading!</p>
+            {doneCount > 0 && (
+              <p>Session complete! {doneCount} reviews saved{graduated > 0 ? `, ${graduated} word(s) graduated to mastered` : ""}.</p>
             )}
+            {doneCount === 0 && !error && <p>No words are due for review. Save some new words while reading!</p>}
+            {error && <div className="review-error">{error}</div>}
             <button className="btn btn-primary" onClick={onClose}>Done</button>
           </div>
         )}
 
         {!finished && current && (
           <div className="review-body">
+            {last && (
+              <div className="review-last">
+                <Icon name="check" size={14} /> {last.word}: {last.label} — {last.text}
+              </div>
+            )}
             <div className="review-word">
               {current.word}
               <button className="icon-btn" title="Pronounce" onClick={() => speakWord(current.word)}><Icon name="volume" /></button>
             </div>
             {exp?.phonetic && <div className="wp-phonetic">{exp.phonetic}</div>}
+            <div className="wp-small">{reviewState(current)}</div>
 
             {!revealed ? (
               <>
@@ -137,11 +179,17 @@ export default function ReviewModal({ onClose, onChanged }: { onClose: () => voi
                   )}
                   {current.context_sentence && <div className="review-context">“{current.context_sentence}”</div>}
                 </div>
+                {error && <div className="review-error">{error}</div>}
                 <div className="review-grades">
                   {GRADES.map((g) => (
-                    <button key={g.key} className={`btn review-grade ${g.cls}`} onClick={() => grade(g.key)}>
+                    <button
+                      key={g.key}
+                      className={`btn review-grade ${g.cls}`}
+                      disabled={grading}
+                      onClick={() => grade(g.key)}
+                    >
                       {g.label}
-                      {g.hint && <span className="grade-hint">{g.hint}</span>}
+                      <span className="grade-hint">{gradePreview(current, g.key)}</span>
                     </button>
                   ))}
                 </div>
@@ -152,6 +200,18 @@ export default function ReviewModal({ onClose, onChanged }: { onClose: () => voi
       </div>
     </div>
   );
+}
+
+/** 按钮上标出这一档对应的下次间隔(和服务端同一套 SM-2 规则算出来的) */
+function gradePreview(item: Item, g: ReviewGrade): string {
+  if (g === "again") return `${Math.round(AGAIN_DELAY_MS / 60000)} min`;
+  return fmtInterval(applyReview(item, g, 0).interval_days);
+}
+
+/** 这张卡当前的复习进度,让人看到之前的评分是记下来的 */
+function reviewState(item: Item): string {
+  if (!item.reps) return "New word";
+  return `Reviewed ${item.reps}× · current interval ${fmtInterval(item.interval_days)}`;
 }
 
 function parseExp(json: string | null): WordExplanation | null {

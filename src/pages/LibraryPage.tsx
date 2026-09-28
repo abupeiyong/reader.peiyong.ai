@@ -25,10 +25,14 @@ export default function LibraryPage({
   const [statsNonce, setStatsNonce] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(() => {
-    api.get<Book[]>("/api/books").then(setBooks).catch((e) => setError((e as Error).message));
+  const loadDueCount = useCallback(() => {
     api.get<{ due_count: number }>("/api/review/queue").then((q) => setDueCount(q.due_count)).catch(() => {});
   }, []);
+
+  const load = useCallback(() => {
+    api.get<Book[]>("/api/books").then(setBooks).catch((e) => setError((e as Error).message));
+    loadDueCount();
+  }, [loadDueCount]);
 
   useEffect(load, [load]);
 
@@ -179,7 +183,7 @@ export default function LibraryPage({
             load();
             setStatsNonce((n) => n + 1);
           }}
-          onChanged={() => {}}
+          onChanged={loadDueCount}
         />
       )}
     </div>
