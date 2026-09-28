@@ -54,7 +54,9 @@
 - 报告:连续天数、收藏/掌握词数、估计词汇量、活动图
 
 **集成**
-- Telegram Bot @reader_peiyong_ai_bot:登录取码(`/login`)、每日复习提醒 + 读书要点回顾(cron)、双向对话
+- Telegram Bot @reader_peiyong_ai_bot:登录取码(`/login`)、读书要点回顾(cron)、双向对话
+- 每日复习卡片:到期的词一词一条推给你,带发音音频和 Hard / Good / Easy 按钮;
+  点按钮即按艾宾浩斯遗忘曲线(SM-2,与网页端同一套)排下一次到期日,每天只发当天到期的那批(上限 10 张)
 
 ## 技术栈
 React + TS + Vite · Cloudflare Workers + Hono · D1 · R2 · Vectorize ·
@@ -74,7 +76,7 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 
 ## 目录结构
 ```
-worker/    Hono API + auth.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / telegram.ts / vocabmodel.ts
+worker/    Hono API + auth.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / tts.ts / telegram.ts / vocabmodel.ts / review.ts
 src/       React 前端(pages/ 页面,components/ 组件,lib/ PDF·TTS·录音·TOC)
 shared/    前后端共享类型
 migrations/ D1 迁移(0001 MVP … 0014 查词思考档位)

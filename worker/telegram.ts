@@ -5,29 +5,59 @@ import type { WordExplanation } from "../shared/types";
 import { explainWord, llmChat } from "./ai";
 import { now } from "./util";
 import { issueLoginCode, chatAllowed } from "./logincode";
+import { speechMp3 } from "./tts";
+import { gradeVocab } from "./review";
+import type { ReviewGrade } from "./vocabmodel";
 
 const API = "https://api.telegram.org";
+const DAILY_CARDS = 10; // 一天最多发几张卡,剩下的按到期顺序留到后面几天
+const CARD_LIMIT = 700; // 卡片正文上限;Telegram caption 上限 1024,余量留给评分结果那一行
+const CARD_GAP_MS = 400; // 连发多条时的间隔,避免触发群发限流
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function telegramEnabled(env: Env): boolean {
   return Boolean(env.TELEGRAM_BOT_TOKEN);
 }
 
-async function call(env: Env, method: string, body: Record<string, unknown>): Promise<{ ok: boolean; result?: unknown }> {
-  const res = await fetch(`${API}/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
+type TgResult = { ok: boolean; result?: unknown; parameters?: { retry_after?: number } };
+
+/** 命中群发限流(429)时按 Telegram 给的秒数等一下,重试一次 */
+async function request(env: Env, method: string, init: RequestInit): Promise<TgResult> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${API}/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, init);
+    const json = (await res.json()) as TgResult;
+    if (res.status !== 429 || attempt >= 1) return json;
+    await sleep(Math.min(json.parameters?.retry_after ?? 1, 5) * 1000);
+  }
+}
+
+async function call(env: Env, method: string, body: Record<string, unknown>): Promise<TgResult> {
+  return request(env, method, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  return (await res.json()) as { ok: boolean; result?: unknown };
 }
 
-export async function sendMessage(env: Env, chatId: string | number, text: string): Promise<void> {
+/** 带文件的接口(sendAudio 等)走 multipart */
+async function callForm(env: Env, method: string, form: FormData): Promise<TgResult> {
+  return request(env, method, { method: "POST", body: form });
+}
+
+export async function sendMessage(
+  env: Env,
+  chatId: string | number,
+  text: string,
+  replyMarkup?: unknown
+): Promise<void> {
   try {
     await call(env, "sendMessage", {
       chat_id: chatId,
       text,
       parse_mode: "HTML",
       disable_web_page_preview: true,
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     });
   } catch (e) {
     console.warn("Telegram sendMessage 失败:", (e as Error).message);
@@ -50,11 +80,29 @@ function esc(s: string): string {
 
 // ---------- webhook 消息处理 ----------
 
+interface TgCallbackQuery {
+  id: string;
+  data?: string;
+  message?: {
+    chat: { id: number };
+    message_id: number;
+    text?: string;
+    caption?: string;
+    entities?: unknown[];
+    caption_entities?: unknown[];
+  };
+}
+
 interface TgUpdate {
   message?: { chat: { id: number }; text?: string };
+  callback_query?: TgCallbackQuery;
 }
 
 export async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
+  if (update.callback_query) {
+    await handleCallback(env, update.callback_query);
+    return;
+  }
   const msg = update.message;
   if (!msg?.text) return;
   const chatId = String(msg.chat.id);
@@ -86,7 +134,7 @@ export async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
       env,
       chatId,
       user
-        ? "Send me an English word for a quick lookup, or ask any question about your reading.\n\n/login — sign-in code for the web app\n/review — today's review words"
+        ? "Send me an English word for a quick lookup, or ask any question about your reading.\n\n/login — sign-in code for the web app\n/review — today's review cards"
         : "Welcome to <b>Immersive Reader</b>. Send /login to get a sign-in code for the web app."
     );
     return;
@@ -98,7 +146,7 @@ export async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
   }
 
   if (text === "/review") {
-    await sendReviewList(env, user.id, chatId);
+    await sendReviewCards(env, user.id, chatId);
     return;
   }
 
@@ -120,73 +168,233 @@ export async function handleUpdate(env: Env, update: TgUpdate): Promise<void> {
   await sendMessage(env, chatId, reply ? esc(reply) : "AI is unavailable right now, please try again later.");
 }
 
+// ---------- 复习卡片(一词一条:音频 + Hard / Good / Easy) ----------
+
 type VocabRow = { id: string; word: string; context_sentence: string | null; explanation_json: string | null };
 
-/** 复习词渲染成「单词 音标 词性 + 中文释义 + 原句」;缺释义的按需 AI 生成并写回缓存(mock 不缓存) */
-async function vocabLines(env: Env, userId: string, rows: VocabRow[]): Promise<string[]> {
+const GRADES: { grade: Exclude<ReviewGrade, "again">; label: string; button: string }[] = [
+  { grade: "hard", label: "Hard", button: "😖 Hard" },
+  { grade: "good", label: "Good", button: "🙂 Good" },
+  { grade: "easy", label: "Easy", button: "😄 Easy" },
+];
+
+function gradeKeyboard(vocabId: string) {
+  return {
+    inline_keyboard: [GRADES.map((g) => ({ text: g.button, callback_data: `rv:${g.grade}:${vocabId}` }))],
+  };
+}
+
+/** 取缓存释义,缺则按需 AI 生成并写回缓存(mock 不缓存) */
+async function ensureExplanation(
+  env: Env,
+  userId: string,
+  row: VocabRow,
+  level: string
+): Promise<WordExplanation | null> {
+  if (row.explanation_json) {
+    try {
+      return JSON.parse(row.explanation_json) as WordExplanation;
+    } catch {
+      /* 缓存损坏则重新生成 */
+    }
+  }
+  const generated = await explainWord(env, userId, row.word, row.context_sentence ?? "", level);
+  if (generated.source === "mock") return null;
+  await env.DB.prepare("UPDATE vocab SET explanation_json = ? WHERE id = ?")
+    .bind(JSON.stringify(generated), row.id)
+    .run()
+    .catch(() => {});
+  return generated;
+}
+
+/** 逐段拼卡片,超长就丢掉后面的段,避免在 HTML 标签中间截断 */
+function joinWithin(parts: string[], limit: number): string {
+  let out = "";
+  for (const p of parts) {
+    if (out && out.length + p.length + 1 > limit) break;
+    out = out ? `${out}\n${p}` : p;
+  }
+  return out;
+}
+
+function wordCard(row: VocabRow, exp: WordExplanation | null, idx: number, total: number): string {
+  const head = [`<b>${esc(row.word.slice(0, 80))}</b>`];
+  if (exp?.phonetic) head.push(esc(exp.phonetic.slice(0, 60)));
+  if (exp?.pos) head.push(`<i>${esc(exp.pos.slice(0, 30))}</i>`);
+  const parts = [`🃏 ${head.join(" ")}  ${idx}/${total}`];
+
+  const meaning = exp?.meaning_zh || exp?.meaning_in_context;
+  if (meaning) parts.push(esc(meaning.slice(0, 200)));
+  if (exp?.meaning_in_context && exp.meaning_in_context !== meaning) {
+    parts.push(esc(exp.meaning_in_context.slice(0, 200)));
+  }
+  if (row.context_sentence) parts.push(`<i>“${esc(row.context_sentence.trim().slice(0, 200))}”</i>`);
+  const example = exp?.examples?.[0];
+  if (example) parts.push(`e.g. ${esc(example.trim().slice(0, 160))}`);
+  if (exp?.collocations?.length) parts.push(`🔗 ${esc(exp.collocations.slice(0, 4).join(" · ").slice(0, 120))}`);
+  if (exp?.forms?.length) parts.push(`↔ ${esc(exp.forms.slice(0, 4).join(" / ").slice(0, 120))}`);
+  if (!exp && !row.context_sentence) parts.push("Recall what this word means, then rate it.");
+  return joinWithin(parts, CARD_LIMIT);
+}
+
+function fileSafe(word: string): string {
+  return word.replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 40) || "word";
+}
+
+/** 一张卡 = 一条带发音音频的消息 + 三个评分按钮;没有 TTS 时退化成纯文本卡 */
+async function sendWordCard(
+  env: Env,
+  chatId: string,
+  row: VocabRow,
+  exp: WordExplanation | null,
+  idx: number,
+  total: number
+): Promise<void> {
+  const caption = wordCard(row, exp, idx, total);
+  const markup = gradeKeyboard(row.id);
+  const audio = await speechMp3(env, row.word, "US").catch(() => null);
+  if (audio) {
+    try {
+      const form = new FormData();
+      form.append("chat_id", chatId);
+      form.append("caption", caption);
+      form.append("parse_mode", "HTML");
+      form.append("title", row.word.slice(0, 64));
+      form.append("performer", "Immersive Reader");
+      form.append("reply_markup", JSON.stringify(markup));
+      form.append("audio", new Blob([audio], { type: "audio/mpeg" }), `${fileSafe(row.word)}.mp3`);
+      const r = await callForm(env, "sendAudio", form);
+      if (r.ok) return;
+      console.warn("Telegram sendAudio 返回失败,回退纯文本卡片");
+    } catch (e) {
+      console.warn("Telegram sendAudio 异常:", (e as Error).message);
+    }
+  }
+  await sendMessage(env, chatId, caption, markup);
+}
+
+/** 到期的词(新词 due_at IS NULL 排最前),以及到期总数 */
+async function dueCards(env: Env, userId: string, limit: number): Promise<{ rows: VocabRow[]; total: number }> {
+  const ts = now();
+  const { results } = await env.DB.prepare(
+    `SELECT id, word, context_sentence, explanation_json FROM vocab
+     WHERE user_id = ? AND status != 'known' AND (due_at IS NULL OR due_at <= ?)
+     ORDER BY due_at IS NOT NULL, due_at ASC LIMIT ?`
+  )
+    .bind(userId, ts, limit)
+    .all<VocabRow>();
+  const total = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM vocab WHERE user_id = ? AND status != 'known' AND (due_at IS NULL OR due_at <= ?)"
+  )
+    .bind(userId, ts)
+    .first<{ n: number }>();
+  return { rows: results, total: total?.n ?? results.length };
+}
+
+/**
+ * 今天该复习的词逐个发出来:一词一卡,带发音,按 Hard / Good / Easy 评分。
+ * 评分后按艾宾浩斯遗忘曲线(SM-2)排下一次到期日,所以每天只发当天到期的那批。
+ */
+async function sendReviewCards(env: Env, userId: string, chatId: string): Promise<number> {
+  const { rows, total } = await dueCards(env, userId, DAILY_CARDS);
+  if (rows.length === 0) {
+    await sendMessage(env, chatId, "No words due for review right now. 🎉");
+    return 0;
+  }
   const level =
     (await env.DB.prepare("SELECT english_level FROM users WHERE id = ?").bind(userId).first<{ english_level: string | null }>())
       ?.english_level ?? "intermediate";
-  const lines: string[] = [];
-  for (const r of rows) {
-    let exp: WordExplanation | null = null;
-    if (r.explanation_json) {
-      try {
-        exp = JSON.parse(r.explanation_json) as WordExplanation;
-      } catch {
-        /* 缓存损坏则重新生成 */
-      }
-    }
-    if (!exp) {
-      const generated = await explainWord(env, userId, r.word, r.context_sentence ?? "", level);
-      if (generated.source !== "mock") {
-        exp = generated;
-        await env.DB.prepare("UPDATE vocab SET explanation_json = ? WHERE id = ?")
-          .bind(JSON.stringify(generated), r.id)
-          .run()
-          .catch(() => {});
-      }
-    }
-    let line = `• <b>${esc(r.word)}</b>`;
-    if (exp?.phonetic) line += ` ${esc(exp.phonetic)}`;
-    if (exp?.pos) line += ` <i>${esc(exp.pos)}</i>`;
-    const meaning = exp?.meaning_zh || exp?.meaning_in_context;
-    if (meaning) line += `\n  ${esc(meaning.slice(0, 80))}`;
-    if (r.context_sentence) line += `\n  <i>“${esc(r.context_sentence.trim().slice(0, 120))}”</i>`;
-    const example = exp?.examples?.[0];
-    if (example) line += `\n  e.g. ${esc(example.trim().slice(0, 160))}`;
-    lines.push(line);
+
+  const head =
+    total > rows.length
+      ? `📝 <b>${rows.length} of ${total} due word(s)</b> — the rest come back on the following days.`
+      : `📝 <b>${rows.length} word(s) to review today</b>`;
+  await sendMessage(env, chatId, `${head}\nPlay the audio, recall the meaning, then rate it: Hard / Good / Easy.`);
+
+  for (let i = 0; i < rows.length; i++) {
+    if (i > 0) await sleep(CARD_GAP_MS);
+    const exp = await ensureExplanation(env, userId, rows[i], level);
+    await sendWordCard(env, chatId, rows[i], exp, i + 1, rows.length);
   }
-  return lines;
+  return rows.length;
 }
 
-/** 超过 Telegram 单条 4096 字符限制时,按空行边界分多条发送 */
-async function sendChunked(env: Env, chatId: string, text: string): Promise<void> {
-  if (text.length <= 4000) return sendMessage(env, chatId, text);
-  let buf = "";
-  for (const block of text.split("\n\n")) {
-    if (buf && buf.length + block.length + 2 > 4000) {
-      await sendMessage(env, chatId, buf);
-      buf = block;
-    } else {
-      buf = buf ? `${buf}\n\n${block}` : block;
-    }
-  }
-  if (buf) await sendMessage(env, chatId, buf);
+// ---------- 按钮评分回调 ----------
+
+async function answerCallback(env: Env, id: string, text: string): Promise<void> {
+  await call(env, "answerCallbackQuery", { callback_query_id: id, text }).catch(() => {});
 }
 
-async function sendReviewList(env: Env, userId: string, chatId: string): Promise<void> {
-  const { results } = await env.DB.prepare(
-    "SELECT id, word, context_sentence, explanation_json FROM vocab WHERE user_id = ? AND status != 'known' AND (due_at IS NULL OR due_at <= ?) ORDER BY due_at LIMIT 12"
-  )
-    .bind(userId, now())
-    .all<VocabRow>();
-  if (results.length === 0) {
-    await sendMessage(env, chatId, "No words due for review right now. 🎉");
+function fmtInterval(days: number): string {
+  if (days < 1) return `${Math.max(1, Math.round(days * 24))}h`;
+  if (days < 30) return `${Math.round(days)}d`;
+  return `${Math.round(days / 30)}mo`;
+}
+
+function fmtDay(ts: number): string {
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+async function handleCallback(env: Env, cq: TgCallbackQuery): Promise<void> {
+  const msg = cq.message;
+  const m = /^rv:(hard|good|easy):(.+)$/.exec(cq.data ?? "");
+  if (!m || !msg) {
+    await answerCallback(env, cq.id, "");
     return;
   }
-  const lines = await vocabLines(env, userId, results);
-  await sendChunked(env, chatId, `📝 <b>${results.length} word(s) to review:</b>\n\n${lines.join("\n\n")}\n\nReview in the app to schedule them: ${appUrl(env)}`);
+  const chatId = String(msg.chat.id);
+  const grade = m[1] as ReviewGrade;
+  const user = await env.DB.prepare("SELECT id FROM users WHERE telegram_chat_id = ?")
+    .bind(chatId)
+    .first<{ id: string }>();
+  if (!user) {
+    await answerCallback(env, cq.id, "Send /login to link this chat first.");
+    return;
+  }
+  const outcome = await gradeVocab(env, user.id, m[2], grade);
+  if (!outcome) {
+    await answerCallback(env, cq.id, "This word is no longer in your list.");
+    return;
+  }
+  const label = GRADES.find((g) => g.grade === grade)?.label ?? grade;
+  const result = outcome.graduated
+    ? "mastered, leaving the review queue 🎓"
+    : `next review in ${fmtInterval(outcome.interval_days)} (${fmtDay(outcome.due_at)})`;
+  await answerCallback(env, cq.id, `${label} — ${outcome.graduated ? "mastered 🎓" : `back in ${fmtInterval(outcome.interval_days)}`}`);
+
+  // 收起按钮并把结果写进卡片,避免同一张卡被重复评分。
+  // Telegram 回传的 caption/text 已去掉 HTML 标记(格式在 *_entities 里),
+  // 所以这里原样带上 entities、不再按 HTML 解析,只在末尾追加纯文本。
+  const suffix = `\n\n✅ ${label} — ${result}`;
+  const isCaption = typeof msg.caption === "string";
+  const base = (isCaption ? msg.caption : msg.text) ?? "";
+  const limit = isCaption ? 1024 : 4096;
+  const fits = base.length + suffix.length <= limit;
+  try {
+    if (!fits) {
+      await call(env, "editMessageReplyMarkup", {
+        chat_id: chatId,
+        message_id: msg.message_id,
+        reply_markup: { inline_keyboard: [] },
+      });
+    } else if (isCaption) {
+      await call(env, "editMessageCaption", {
+        chat_id: chatId,
+        message_id: msg.message_id,
+        caption: `${base}${suffix}`,
+        caption_entities: msg.caption_entities ?? [],
+      });
+    } else {
+      await call(env, "editMessageText", {
+        chat_id: chatId,
+        message_id: msg.message_id,
+        text: `${base}${suffix}`,
+        entities: msg.entities ?? [],
+      });
+    }
+  } catch (e) {
+    console.warn("Telegram 卡片更新失败:", (e as Error).message);
+  }
 }
 
 function fmtDuration(ms: number): string {
@@ -225,13 +433,6 @@ export async function runDailyPush(env: Env): Promise<void> {
 }
 
 async function pushDaily(env: Env, userId: string, chatId: string): Promise<void> {
-  // 待复习词
-  const { results: due } = await env.DB.prepare(
-    "SELECT id, word, context_sentence, explanation_json FROM vocab WHERE user_id = ? AND status != 'known' AND (due_at IS NULL OR due_at <= ?) ORDER BY due_at LIMIT 8"
-  )
-    .bind(userId, now())
-    .all<VocabRow>();
-
   // 最近在读的书
   const reading = await env.DB.prepare(
     `SELECT b.id AS book_id, b.title, rp.page_no FROM reading_progress rp
@@ -254,13 +455,6 @@ async function pushDaily(env: Env, userId: string, chatId: string): Promise<void
   } else {
     msg += "⏱ No reading in the last 24h — even a few pages today counts. 📚\n\n";
   }
-  if (due.length) {
-    msg += `You have <b>${due.length}</b> word(s) to review today:\n\n`;
-    msg += (await vocabLines(env, userId, due)).join("\n\n");
-    msg += "\n\n";
-  } else {
-    msg += "No words are due today — your queue is clear. 🎉\n\n";
-  }
 
   if (reading) {
     msg += `Currently reading: <b>${esc(reading.title)}</b> (page ${reading.page_no}).\n`;
@@ -279,11 +473,14 @@ async function pushDaily(env: Env, userId: string, chatId: string): Promise<void
         ],
         { maxTokens: 200 }
       );
-      if (recap) msg += `Recap: ${esc(recap.trim())}\n`;
+      if (recap) msg += `Recap: ${esc(recap.trim().slice(0, 800))}\n`;
     }
     msg += "\n";
   }
 
   msg += `Open the app to continue: ${appUrl(env)}`;
-  await sendChunked(env, chatId, msg);
+  await sendMessage(env, chatId, msg);
+
+  // 复习词随后逐张发卡(带发音和评分按钮)
+  await sendReviewCards(env, userId, chatId);
 }
