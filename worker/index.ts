@@ -1,10 +1,11 @@
 import { Hono } from "hono";
 import type { Env, Vars } from "./env";
 import { authRoutes, requireAuth } from "./auth";
-import { uid, now, tokenizeWords, fnv1aHex, sha256Hex } from "./util";
-import { explainWord, analyzePage, chatStream, transcribeAudio, embedTexts, ttsAudio, ocrImage } from "./ai";
-import { elevenTts, voiceTag } from "./elevenlabs";
-import { estimateVocabRank, hintsForText, applyReview, priorRank, type ReviewGrade } from "./vocabmodel";
+import { uid, now, tokenizeWords, fnv1aHex } from "./util";
+import { explainWord, analyzePage, chatStream, transcribeAudio, embedTexts, ocrImage } from "./ai";
+import { speechMp3 } from "./tts";
+import { estimateVocabRank, hintsForText, priorRank, type ReviewGrade } from "./vocabmodel";
+import { gradeVocab } from "./review";
 import { wordRank } from "./wordfreq";
 import { telegramEnabled, handleUpdate, runDailyPush } from "./telegram";
 import { generateCover } from "./cover";
@@ -440,21 +441,9 @@ api.post("/review/:id", async (c) => {
   const userId = c.get("userId");
   const body = await c.req.json<{ grade: ReviewGrade }>();
   if (!["again", "hard", "good", "easy"].includes(body.grade)) return c.json({ error: "bad grade" }, 400);
-  const item = await c.env.DB.prepare("SELECT interval_days, ease, reps FROM vocab WHERE id = ? AND user_id = ?")
-    .bind(c.req.param("id"), userId)
-    .first<{ interval_days: number; ease: number; reps: number }>();
-  if (!item) return c.json({ error: "not found" }, 404);
-  const next = applyReview(item, body.grade, now());
-  // 长间隔视为已掌握
-  const newStatus = next.interval_days >= 30 ? "known" : undefined;
-  await c.env.DB.prepare(
-    `UPDATE vocab SET interval_days = ?, ease = ?, reps = ?, due_at = ?, last_review = ?, updated_at = ?
-     ${newStatus ? ", status = 'known'" : ""} WHERE id = ? AND user_id = ?`
-  )
-    .bind(next.interval_days, next.ease, next.reps, next.due_at, now(), now(), c.req.param("id"), userId)
-    .run();
-  void logActivity(c.env, userId, "review");
-  return c.json({ ok: true, due_at: next.due_at, interval_days: next.interval_days, graduated: Boolean(newStatus) });
+  const outcome = await gradeVocab(c.env, userId, c.req.param("id"), body.grade);
+  if (!outcome) return c.json({ error: "not found" }, 404);
+  return c.json({ ok: true, ...outcome });
 });
 
 // 复习卡缺完整释义时按需生成并缓存(不写 word_events,避免干扰词汇模型)
@@ -774,23 +763,9 @@ api.get("/tts", async (c) => {
   const accent = c.req.query("accent") === "GB" ? "GB" : "US";
   const headers = { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" };
 
-  // R2 持久缓存:同一 (口音, 文本) 的音频全局复用,省 ElevenLabs 配额且 ~50ms 返回
-  const key = `tts/${accent}${voiceTag(c.env, accent)}/${await sha256Hex(text.trim().replace(/\s+/g, " ").toLowerCase())}.mp3`;
-  const cached = await c.env.BUCKET.get(key);
-  if (cached) return new Response(cached.body, { headers });
-
-  // 优先 ElevenLabs(eleven_v3)→ 回退 Workers AI melotts
-  const eleven = await elevenTts(c.env, text, accent);
-  if (eleven) {
-    // 只缓存 ElevenLabs 结果;melotts 兜底不缓存,恢复后自动升级音质
-    c.executionCtx.waitUntil(
-      c.env.BUCKET.put(key, eleven, { httpMetadata: { contentType: "audio/mpeg" } }).catch((e) =>
-        console.warn("TTS 缓存写入失败:", (e as Error).message)
-      )
-    );
-    return new Response(eleven as unknown as BodyInit, { headers });
-  }
-  const audio = await ttsAudio(c.env, text);
+  // R2 持久缓存(同一 (口音, 文本) 全局复用)→ ElevenLabs → Workers AI melotts,
+  // 与 Telegram 复习卡片的发音共用一套缓存
+  const audio = await speechMp3(c.env, text, accent, (p) => c.executionCtx.waitUntil(p));
   if (!audio) return c.json({ error: "TTS 不可用" }, 503);
   return new Response(audio as unknown as BodyInit, { headers });
 });
