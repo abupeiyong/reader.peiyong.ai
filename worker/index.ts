@@ -8,7 +8,7 @@ import { estimateVocabRank, hintsForText, priorRank } from "./vocabmodel";
 import type { ReviewGrade } from "../shared/srs";
 import { gradeVocab } from "./review";
 import { wordRank } from "./wordfreq";
-import { telegramEnabled, handleUpdate, runDailyPush } from "./telegram";
+import { telegramEnabled, handleUpdate, runDailyPush, ensureCallbackUpdates } from "./telegram";
 import { generateCover } from "./cover";
 import { openaiProbe } from "./openai";
 import {
@@ -55,7 +55,9 @@ tg.post("/webhook", async (c) => {
     return c.json({ ok: false }, 403);
   }
   const update = await c.req.json().catch(() => ({}));
-  c.executionCtx.waitUntil(handleUpdate(c.env, update));
+  c.executionCtx.waitUntil(
+    handleUpdate(c.env, update).catch((e) => console.warn("Telegram update 处理失败:", (e as Error).message))
+  );
   return c.json({ ok: true });
 });
 app.route("/api/tg", tg);
@@ -1383,6 +1385,7 @@ export default {
   fetch: app.fetch,
   // Cron:每小时触发,按用户设定的 UTC 小时推送每日复习提醒
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runDailyPush(env));
+    // 顺带自检 webhook 是否会收到按钮点击(callback_query),配置漏了就补上
+    ctx.waitUntil(ensureCallbackUpdates(env).then(() => runDailyPush(env)));
   },
 } satisfies ExportedHandler<Env>;

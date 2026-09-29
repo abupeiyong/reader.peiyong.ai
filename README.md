@@ -70,7 +70,8 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
   `TELEGRAM_WEBHOOK_SECRET`、`TELEGRAM_OWNER_CHAT_ID`(可选,限定唯一可登录的 chat)
 - 本地开发(`APP_ENV != production`)保留邮箱直登,供 e2e 用;生产环境自动禁用
 - Vectorize 索引 `reader-vec`(1024 维,cosine),部署前创建一次
-- Cron `0 * * * *` 驱动 Telegram 每日推送
+- Cron `0 * * * *` 驱动 Telegram 每日推送,并自检 webhook 的 `allowed_updates`:
+  显式设过却漏了 `callback_query` 会让评分按钮点了没反应,自检时在原 url 上补齐(不改 url)
 - `OPENAI_BASE_URL` / `DEEPSEEK_BASE_URL` 可在直连与兼容网关间切换
 - `public/standard_fonts` + `public/cmaps` 由 prebuild 钩子从 pdfjs-dist 同步
 
