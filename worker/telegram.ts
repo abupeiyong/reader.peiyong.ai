@@ -322,10 +322,28 @@ async function sendReviewCards(env: Env, userId: string, chatId: string): Promis
 // ---------- 按钮评分回调 ----------
 
 async function answerCallback(env: Env, id: string, text: string): Promise<void> {
-  await call(env, "answerCallbackQuery", { callback_query_id: id, text }).catch(() => {});
+  try {
+    const r = await call(env, "answerCallbackQuery", { callback_query_id: id, text });
+    if (!r.ok) console.warn("Telegram answerCallbackQuery 返回失败");
+  } catch (e) {
+    console.warn("Telegram answerCallbackQuery 异常:", (e as Error).message);
+  }
 }
 
+/**
+ * 按钮点击必须给出反馈:评分链路上任何一步抛错都不能让按钮一直转圈,
+ * 所以这里兜住异常,至少弹一条提示出来(同时留日志便于排查)。
+ */
 async function handleCallback(env: Env, cq: TgCallbackQuery): Promise<void> {
+  try {
+    await gradeFromCallback(env, cq);
+  } catch (e) {
+    console.warn("Telegram 评分回调失败:", (e as Error).message);
+    await answerCallback(env, cq.id, "Something went wrong, please try again.");
+  }
+}
+
+async function gradeFromCallback(env: Env, cq: TgCallbackQuery): Promise<void> {
   const msg = cq.message;
   const m = /^rv:(hard|good|easy):(.+)$/.exec(cq.data ?? "");
   if (!m || !msg) {
@@ -359,31 +377,78 @@ async function handleCallback(env: Env, cq: TgCallbackQuery): Promise<void> {
   const isCaption = typeof msg.caption === "string";
   const base = (isCaption ? msg.caption : msg.text) ?? "";
   const limit = isCaption ? 1024 : 4096;
-  const fits = base.length + suffix.length <= limit;
-  try {
-    if (!fits) {
-      await call(env, "editMessageReplyMarkup", {
+  const fits = Boolean(base) && base.length + suffix.length <= limit;
+  let rewritten = false;
+  if (fits) {
+    try {
+      const r = isCaption
+        ? await call(env, "editMessageCaption", {
+            chat_id: chatId,
+            message_id: msg.message_id,
+            caption: `${base}${suffix}`,
+            caption_entities: msg.caption_entities ?? [],
+          })
+        : await call(env, "editMessageText", {
+            chat_id: chatId,
+            message_id: msg.message_id,
+            text: `${base}${suffix}`,
+            entities: msg.entities ?? [],
+          });
+      rewritten = r.ok;
+      if (!r.ok) console.warn("Telegram 卡片改写被拒,回退为只收起按钮");
+    } catch (e) {
+      console.warn("Telegram 卡片改写异常:", (e as Error).message);
+    }
+  }
+  // 改写不成(太长 / 被拒 / 报错)时至少要把按钮收起来,否则这一下点击看上去毫无反应
+  if (!rewritten) {
+    let cleared = false;
+    try {
+      const r = await call(env, "editMessageReplyMarkup", {
         chat_id: chatId,
         message_id: msg.message_id,
         reply_markup: { inline_keyboard: [] },
       });
-    } else if (isCaption) {
-      await call(env, "editMessageCaption", {
-        chat_id: chatId,
-        message_id: msg.message_id,
-        caption: `${base}${suffix}`,
-        caption_entities: msg.caption_entities ?? [],
-      });
-    } else {
-      await call(env, "editMessageText", {
-        chat_id: chatId,
-        message_id: msg.message_id,
-        text: `${base}${suffix}`,
-        entities: msg.entities ?? [],
-      });
+      cleared = r.ok;
+      if (!r.ok) console.warn("Telegram 收起按钮被拒");
+    } catch (e) {
+      console.warn("Telegram 收起按钮异常:", (e as Error).message);
     }
+    // 连按钮都改不动(比如卡片已超过 48 小时的可编辑期),就回一条消息,
+    // 保证每次点击都有肉眼可见的反馈。
+    if (!cleared) {
+      await call(env, "sendMessage", {
+        chat_id: chatId,
+        text: `✅ ${label} — ${result}`,
+        reply_parameters: { message_id: msg.message_id, allow_sending_without_reply: true },
+      }).catch((e) => console.warn("Telegram 评分回执发送失败:", (e as Error).message));
+    }
+  }
+}
+
+/**
+ * webhook 自检:setWebhook 时若显式传过 allowed_updates 却漏了 callback_query,
+ * Telegram 根本不会把按钮点击推过来 —— 表现就是点 Hard/Good/Easy 完全没反应。
+ * 只在已注册的 webhook 上补这一项,不碰 url,避免把 bot 指到错误地址。
+ * (getWebhookInfo 只在显式设置过 allowed_updates 时才返回该字段,缺省值本身含 callback_query。)
+ */
+export async function ensureCallbackUpdates(env: Env): Promise<void> {
+  if (!telegramEnabled(env)) return;
+  try {
+    const info = (await call(env, "getWebhookInfo", {})).result as
+      | { url?: string; allowed_updates?: string[] }
+      | undefined;
+    const allowed = info?.allowed_updates;
+    if (!info?.url || !Array.isArray(allowed) || allowed.length === 0) return;
+    if (allowed.includes("callback_query")) return;
+    const r = await call(env, "setWebhook", {
+      url: info.url,
+      allowed_updates: [...allowed, "callback_query"],
+      ...(env.TELEGRAM_WEBHOOK_SECRET ? { secret_token: env.TELEGRAM_WEBHOOK_SECRET } : {}),
+    });
+    console.warn(`Telegram webhook 缺少 callback_query,已补齐:${r.ok}`);
   } catch (e) {
-    console.warn("Telegram 卡片更新失败:", (e as Error).message);
+    console.warn("Telegram webhook 自检失败:", (e as Error).message);
   }
 }
 
