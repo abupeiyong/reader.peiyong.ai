@@ -17,8 +17,8 @@ interface Spec {
   models: string[]; // 内置清单:没有 key 或问不到 /models 时的兜底
   /** 属于这家的模型名;OpenAI 的 /models 里混着 embedding/tts,要按这个过滤 */
   owns: RegExp;
-  /** 是否向 /models 要实时清单(DeepSeek 只返回对话模型,直接可用) */
-  live?: boolean;
+  /** /models 里属于这家、但不能走 chat/completions 的(语音、图像、嵌入、补全…) */
+  skips?: RegExp;
 }
 
 export const PROVIDERS: Record<AiProviderId, Spec> = {
@@ -28,6 +28,8 @@ export const PROVIDERS: Record<AiProviderId, Spec> = {
     model: "gpt-5-nano",
     models: ["gpt-5-nano", "gpt-5-mini", "gpt-5"],
     owns: /^(gpt|o\d|chatgpt)/i,
+    // OpenAI 的 /models 把所有模态混在一起返回,这些不是对话模型,选了必然 400
+    skips: /(audio|realtime|transcribe|tts|image|dall-e|whisper|embedding|moderation|search-preview|codex|instruct)/i,
   },
   deepseek: {
     label: "DeepSeek",
@@ -35,7 +37,6 @@ export const PROVIDERS: Record<AiProviderId, Spec> = {
     model: "deepseek-chat",
     models: ["deepseek-chat", "deepseek-reasoner"],
     owns: /^deepseek/i,
-    live: true,
   },
 };
 
@@ -178,13 +179,12 @@ const MODELS_TTL_MS = 10 * 60 * 1000;
 const modelsCache = new Map<string, { at: number; models: string[] }>();
 
 /**
- * 设置页可选的模型。live 的提供商(DeepSeek)优先用它 /models 返回的真实清单,
+ * 设置页可选的模型:两家都优先用它们 /models 返回的真实清单,
  * 这样新上/下线的模型不用改代码就能选到;没 key、超时或返回空时退回内置清单。
  */
 export async function providerModels(env: Env, row: AiSettingsRow | null, p: AiProviderId): Promise<string[]> {
   const spec = PROVIDERS[p];
   const fallback = spec.models;
-  if (!spec.live) return fallback;
 
   const apiKey = userKey(row, p) || envKey(env, p);
   if (!apiKey) return fallback;
@@ -195,7 +195,7 @@ export async function providerModels(env: Env, row: AiSettingsRow | null, p: AiP
   if (hit && now() - hit.at < MODELS_TTL_MS) return hit.models;
 
   const live = await openaiListModels({ provider: p, apiKey, baseUrl });
-  const ids = (live ?? []).filter((m) => spec.owns.test(m)).sort();
+  const ids = (live ?? []).filter((m) => spec.owns.test(m) && !spec.skips?.test(m)).sort();
   if (!ids.length) return fallback;
 
   // 默认模型必须在列表里,否则设置页的下拉会显示一个选不中的值
