@@ -6,6 +6,7 @@ import LibraryPage from "./pages/LibraryPage";
 import ReaderPage from "./pages/ReaderPage";
 import SettingsPage from "./pages/SettingsPage";
 import AiStatsPage from "./pages/AiStatsPage";
+import PhoneticsPage from "./pages/PhoneticsPage";
 
 function useHashRoute(): string {
   const [hash, setHash] = useState(location.hash || "#/");
@@ -55,5 +56,6 @@ export default function App() {
   }
   if (hash.startsWith("#/settings")) return <SettingsPage />;
   if (hash.startsWith("#/ai-stats")) return <AiStatsPage />;
+  if (hash.startsWith("#/phonetics")) return <PhoneticsPage />;
   return <LibraryPage user={user} onUserChange={setUser} />;
 }

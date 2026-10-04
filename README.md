@@ -46,6 +46,13 @@
 - 音频缓存在 R2(`tts/<口音>[-音色指纹]/<文本 sha256>.mp3`):同一句全局复用,
   命中约 10ms(未命中约 3-4s);换音色自动分桶,melotts 兜底结果不缓存
 
+**音标(`#/phonetics`)**
+- 元音按舌位画在元音图(梯形)上,双元音与辅音(爆破 / 摩擦 / 塞擦 / 鼻音 / 近音)分组列出
+- 点音标出声并展开例词,点例词逐词朗读;英音 / 美音一键切换(两边元音表不同,辅音共用)
+- IPA 直接交给 TTS 会被逐字念成「slash i colon slash」,所以每个音素另存一个发音提示
+  (`/p/` → puh、`/iː/` → ee),念「提示 + 代表词」;`/ŋ/`、`/æ/`、`/θ/` 这类单独成不了
+  音节的省掉提示,只念代表词
+
 **笔记、日历与报告(My Library)**
 - 每页记笔记(可基于选中文字)
 - 阅读日历:每天读的书、查/收藏的词和短语、笔记、读书总时长
@@ -79,7 +86,7 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 ## 目录结构
 ```
 worker/    Hono API + auth.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / tts.ts / telegram.ts / vocabmodel.ts / review.ts
-src/       React 前端(pages/ 页面,components/ 组件,lib/ PDF·TTS·录音·TOC)
+src/       React 前端(pages/ 页面,components/ 组件,lib/ PDF·TTS·录音·TOC·音标表)
 shared/    前后端共享类型
 migrations/ D1 迁移(0001 MVP … 0014 查词思考档位)
 scripts/   Playwright 端到端自测(scripts/e2e.mjs)
