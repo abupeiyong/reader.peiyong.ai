@@ -31,7 +31,8 @@ import {
   wordThinkLevel,
 } from "./aiprovider";
 import {
-  DAILY_GOAL_MS,
+  DAILY_GOAL_DEFAULT_MIN,
+  DAILY_GOAL_LIMITS,
   type AiCallKind,
   type AiCallLog,
   type AiLatencyGroup,
@@ -40,6 +41,7 @@ import {
   type AiSettings,
   type AiStats,
   type ChatScope,
+  type ReadingGoal,
   type ReadingToday,
 } from "../shared/types";
 
@@ -1266,6 +1268,62 @@ api.patch("/reading-sessions/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// ---------- 每日阅读目标 ----------
+
+// 目标存在 users.daily_goal_min(迁移 0015),单位分钟;NULL = 没设过,按默认 3 小时算。
+const GOAL_COLUMN_SQL = "ALTER TABLE users ADD COLUMN daily_goal_min INTEGER";
+
+/**
+ * 迁移 0015 的兜底:部署了新代码但 `npm run db:migrate:remote` 没跑到时这一列不存在,
+ * 查询会直接 500(专注提醒和设置页都用它)。只在报「列不存在」时补一次列再重试。
+ */
+async function withGoalColumn<T>(env: Env, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (e) {
+    const err = e as { message?: string; cause?: { message?: string } };
+    if (!/no such column/i.test(`${err.message ?? ""} ${err.cause?.message ?? ""}`)) throw e;
+    await env.DB.prepare(GOAL_COLUMN_SQL)
+      .run()
+      .catch((e2) => console.warn("daily_goal_min 兜底:", (e2 as Error).message));
+    return run();
+  }
+}
+
+/** 这个用户的每日目标(分钟);没设过、超出区间或读不到都按默认算 */
+async function dailyGoalMin(env: Env, userId: string): Promise<number> {
+  const row = await withGoalColumn(env, () =>
+    env.DB.prepare("SELECT daily_goal_min FROM users WHERE id = ?")
+      .bind(userId)
+      .first<{ daily_goal_min: number | null }>()
+  ).catch((e) => {
+    console.warn("读每日目标失败:", (e as Error).message);
+    return null;
+  });
+  const min = typeof row?.daily_goal_min === "number" ? Math.round(row.daily_goal_min) : NaN;
+  if (!Number.isFinite(min)) return DAILY_GOAL_DEFAULT_MIN;
+  return Math.min(DAILY_GOAL_LIMITS.max, Math.max(DAILY_GOAL_LIMITS.min, min));
+}
+
+api.get("/reading-goal", async (c) => {
+  const body: ReadingGoal = { goal_min: await dailyGoalMin(c.env, c.get("userId")) };
+  return c.json(body);
+});
+
+// 设置页改每日目标。只认区间内的整数分钟,越界直接 400(页面上给的是固定几档)。
+api.put("/reading-goal", async (c) => {
+  const body = await c.req.json<{ goal_min?: number }>().catch(() => ({}) as { goal_min?: number });
+  const min = Math.round(Number(body.goal_min));
+  if (!Number.isFinite(min) || min < DAILY_GOAL_LIMITS.min || min > DAILY_GOAL_LIMITS.max) {
+    return c.json({ error: `每日目标要在 ${DAILY_GOAL_LIMITS.min} ~ ${DAILY_GOAL_LIMITS.max} 分钟之间` }, 400);
+  }
+  await withGoalColumn(c.env, () =>
+    c.env.DB.prepare("UPDATE users SET daily_goal_min = ? WHERE id = ?").bind(min, c.get("userId")).run()
+  );
+  const out: ReadingGoal = { goal_min: min };
+  return c.json(out);
+});
+
 // 今天(用户本地日)已读总时长 + 当日目标,供阅读页的专注提醒用。
 // exclude=<session id>:排除正在进行的这次会话,调用方自己把还没落库的实时时长加上,
 // 这样卡片上的数字不依赖心跳是否刚好落过库。
@@ -1288,7 +1346,8 @@ api.get("/reading-today", async (c) => {
       .first<{ started_at: number }>();
     if (live) liveCountsToday = live.started_at >= dayStart;
   }
-  const body: ReadingToday = { ms: row?.ms ?? 0, goal_ms: DAILY_GOAL_MS, live_counts_today: liveCountsToday };
+  const goalMs = (await dailyGoalMin(c.env, userId)) * 60000;
+  const body: ReadingToday = { ms: row?.ms ?? 0, goal_ms: goalMs, live_counts_today: liveCountsToday };
   return c.json(body);
 });
 

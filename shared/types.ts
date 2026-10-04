@@ -210,12 +210,23 @@ export interface AiStats {
   recent: AiCallLog[];
 }
 
-/** 每日阅读目标:3 小时 */
-export const DAILY_GOAL_MS = 3 * 60 * 60 * 1000;
+/** 每日阅读目标:默认 3 小时;用户可以在设置页改(存 users.daily_goal_min) */
+export const DAILY_GOAL_DEFAULT_MIN = 180;
+
+/** 设置页允许的目标区间(分钟):15 分钟 ~ 12 小时 */
+export const DAILY_GOAL_LIMITS = { min: 15, max: 720 } as const;
+
+/** 设置页下拉里的几档时长(分钟) */
+export const DAILY_GOAL_PRESET_MIN = [15, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 480, 720];
+
+/** GET/PUT /api/reading-goal:当前的每日阅读目标(分钟) */
+export interface ReadingGoal {
+  goal_min: number;
+}
 
 export interface ReadingToday {
   ms: number;       // 今天(用户本地日)已读的 active_ms 总和(带 exclude 时不含被排除的那次会话)
-  goal_ms: number;  // 当日目标
+  goal_ms: number;  // 当日目标(设置页里设的,没设过就是默认 3 小时)
   /**
    * 被 exclude 的那次会话(通常是正在进行的这次)算不算今天:
    * 会话整段计入它「开始」的那个本地日,所以跨午夜时它可能属于昨天。
