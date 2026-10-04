@@ -1,11 +1,11 @@
 // 设置页:选 AI 提供商(OpenAI / DeepSeek / Random)、模型,填各家的 API key,
-// 以及查词时让模型「思考」到哪一档(默认 off,查词图的是快)。
+// 查词时让模型「思考」到哪一档(默认 off,查词图的是快),以及每天想读多久。
 // Random = 每次 AI 任务在「填了 key 的提供商」里随机挑一家,各家用自己那份已选模型。
 // key 保存后不再回显明文,只显示末 4 位;留空保存 = 清除,回退部署时配置的 secret。
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { THINK_LEVELS } from "../../shared/types";
-import type { AiProviderInfo, AiProviderTest, AiSettings, ThinkLevel } from "../../shared/types";
+import { DAILY_GOAL_DEFAULT_MIN, DAILY_GOAL_PRESET_MIN, THINK_LEVELS } from "../../shared/types";
+import type { AiProviderInfo, AiProviderTest, AiSettings, ReadingGoal, ThinkLevel } from "../../shared/types";
 import { Icon } from "../components/Icon";
 
 /** 查词思考档位的显示文案;档位本身就是 gpt-5 的 reasoning_effort */
@@ -274,9 +274,85 @@ export default function SettingsPage() {
             </section>
           </>
         )}
+
+        <ReadingGoalCard />
       </main>
     </div>
   );
+}
+
+/** 每日阅读目标:阅读页的专注提醒按它算「今天还差多久」,原来写死 3 小时 */
+function ReadingGoalCard() {
+  const [goalMin, setGoalMin] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    void api
+      .get<ReadingGoal>("/api/reading-goal")
+      .then((r) => setGoalMin(r.goal_min))
+      .catch((e) => setErr((e as Error).message || "加载每日目标失败"));
+  }, []);
+
+  const pick = async (min: number) => {
+    setErr("");
+    setBusy(true);
+    try {
+      const r = await api.put<ReadingGoal>("/api/reading-goal", { goal_min: min });
+      setGoalMin(r.goal_min);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // 存着的值不在这几档里时也列出来,免得下拉显示空白
+  const options =
+    goalMin !== null && !DAILY_GOAL_PRESET_MIN.includes(goalMin)
+      ? [...DAILY_GOAL_PRESET_MIN, goalMin].sort((a, b) => a - b)
+      : DAILY_GOAL_PRESET_MIN;
+
+  return (
+    <section className="settings-card">
+      <div className="tg-head">
+        <Icon name="clock" size={18} />
+        <b>Daily reading goal</b>
+        {saved && <span className="settings-saved"><Icon name="check" /> Goal saved</span>}
+      </div>
+      <p className="tg-desc">
+        How long you aim to read each day. The focus reminder in the reader counts down to this — push it up on the days
+        you want more, or down when three hours is too much.
+      </p>
+      <label className="tg-row">
+        <span>Time per day</span>
+        <select
+          value={goalMin ?? DAILY_GOAL_DEFAULT_MIN}
+          disabled={busy || goalMin === null}
+          onChange={(e) => void pick(Number(e.target.value))}
+        >
+          {options.map((m) => (
+            <option key={m} value={m}>
+              {goalLabel(m)}
+              {m === DAILY_GOAL_DEFAULT_MIN ? " (default)" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      {err && <p className="error-text">{err}</p>}
+    </section>
+  );
+}
+
+/** 目标时长的显示文案:45m / 1h / 1h 30m */
+function goalLabel(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
 /** 某一家的模型下拉;当前值不在清单里(比如提供商下线了它)时也照样列出来,免得下拉显示空白 */
