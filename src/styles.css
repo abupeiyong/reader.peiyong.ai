@@ -773,3 +773,70 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .ai-bar { display: block; height: 8px; border-radius: 4px; background: var(--primary); }
 .ai-failed { color: var(--danger); font-size: 12px; }
 .ai-note { margin: 10px 0 0; }
+
+/* ---------- 音标学习页 ---------- */
+
+.ipa-intro { max-width: 760px; line-height: 1.6; margin: 0 0 14px; }
+.ipa-group-hint { margin: -6px 0 12px; }
+
+/* 元音图:左侧舌位高度、上方前后位置,梯形里按坐标摆音标 */
+.vowel-wrap { display: flex; gap: 10px; }
+.vowel-axis-y {
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: 22px 0 0; font-size: 11px; color: var(--muted); text-align: right; flex-shrink: 0;
+}
+.vowel-main { flex: 1; min-width: 0; }
+.vowel-axis-x {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--muted); margin-bottom: 6px; padding: 0 10px;
+}
+/* 留出内边距:音标是以坐标为中心摆的,梯形边上的那几个会探出去一半 */
+.vowel-plot { position: relative; height: 300px; margin: 0 34px 10px; }
+.vowel-quad { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.vowel-quad polygon { fill: rgba(124, 91, 59, 0.05); stroke: var(--border); stroke-width: 1.5; }
+
+.vowel-dot {
+  position: absolute; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  min-width: 46px; padding: 4px 8px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); transition: all 0.15s;
+}
+.vowel-dot:hover { border-color: var(--primary); color: var(--primary); }
+.vowel-dot.active { background: var(--primary); border-color: var(--primary); color: #fbf9f3; }
+
+/* 双元音 / 辅音:方块网格 */
+.ipa-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.ipa-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  min-width: 62px; padding: 7px 10px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); transition: all 0.15s;
+}
+.ipa-tile:hover { border-color: var(--primary); color: var(--primary); }
+.ipa-tile.active { background: var(--primary); border-color: var(--primary); color: #fbf9f3; }
+
+.ipa-sym { font-family: var(--serif); font-size: 18px; line-height: 1.2; }
+.ipa-key { font-size: 11px; opacity: 0.72; }
+
+/* 展开的例词 */
+.ipa-detail {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border);
+}
+.ipa-words { display: flex; flex-wrap: wrap; gap: 8px; }
+.ipa-word {
+  border: 1px solid var(--border); background: #fff; border-radius: 999px;
+  padding: 5px 14px; font-size: 14px; cursor: pointer; color: var(--text);
+  font-family: var(--serif);
+}
+.ipa-word:hover { border-color: var(--primary); color: var(--primary); }
+
+@media (max-width: 720px) {
+  /* 手机上元音图窄得多,只留音标,代表词交给展开的例词区 */
+  .vowel-plot { height: 260px; margin: 0 20px 10px; }
+  .vowel-dot { min-width: 0; padding: 3px 6px; }
+  .vowel-dot .ipa-key { display: none; }
+  .ipa-sym { font-size: 16px; }
+  .ipa-tile { min-width: 54px; padding: 6px 8px; }
+}

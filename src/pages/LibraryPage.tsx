@@ -87,6 +87,7 @@ export default function LibraryPage({
         <div className="lib-brand"><Icon name="book" size={20} /> Immersive Reader</div>
         <div className="lib-user">
           <span>{user.name || user.email}</span>
+          <a className="btn btn-ghost" href="#/phonetics"><Icon name="volume" /> Phonetics</a>
           <a className="btn btn-ghost" href="#/settings"><Icon name="settings" /> Settings</a>
           <button className="btn btn-ghost" onClick={logout}>Sign out</button>
         </div>
