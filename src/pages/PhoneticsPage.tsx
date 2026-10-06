@@ -1,17 +1,27 @@
 // 音标学习页(#/phonetics):英音 / 美音切换,元音画在元音图上按舌位摆,
-// 辅音按发音方式分组。点音标出声并展开例词,点例词逐词朗读 —— 发音走和查词同一条
-// TTS 链路(ElevenLabs → melotts → 浏览器合成)。
+// 辅音按发音方式分组。点音标出声并展开例词,点例词逐词朗读。
+// 音标放的是 Wikimedia Commons 上的 IPA 标准录音(真人发音),没有录音的音标和例词
+// 才走查词那条 TTS 链路(ElevenLabs → melotts → 浏览器合成)。
 import { useState } from "react";
 import { Icon } from "../components/Icon";
-import { speakWord, type Accent } from "../lib/speech";
+import { playRecording, speakWord, type Accent } from "../lib/speech";
 import {
   ACCENT_CHARTS,
   CONSONANT_GROUPS,
+  RECORDING_CREDIT,
   VOWEL_QUAD_POINTS,
-  phonemeSpeech,
+  phonemeRecording,
   type AccentChart,
   type Phoneme,
 } from "../lib/phonetics";
+
+/** 发这个音:先放标准录音,没有(双元音、美音 /ɝ/)或者放不出来再退回 TTS 念代表词 */
+async function pronounce(p: Phoneme, accent: Accent) {
+  const recording = phonemeRecording(p.ipa);
+  // playRecording 要在点击的手势里同步调起 play(),所以别在它前面 await 任何东西
+  if (recording && (await playRecording(recording))) return;
+  await speakWord(p.keyword, accent);
+}
 
 /** 当前展开的音素:同一时刻只开一个,所以要连所在分组一起记 */
 interface Selection {
@@ -27,7 +37,7 @@ export default function PhoneticsPage() {
   // 不然想多听两遍就把刚打开的例词弄没了。
   const pick = (group: string, p: Phoneme, accent: Accent) => {
     setSel({ group, ipa: p.ipa });
-    void speakWord(phonemeSpeech(p), accent);
+    void pronounce(p, accent);
   };
 
   const accent = chart.accent;
@@ -67,9 +77,10 @@ export default function PhoneticsPage() {
         </div>
 
         <p className="hint-text ipa-intro">
-          Tap a symbol to hear the sound, then tap any example word to hear it in a real word — everything is spoken in
-          the accent selected above. A symbol is read as a short cue plus its key word (“puh, pen”); sounds that cannot
-          stand on their own in English, such as /ŋ/, are read as the key word alone.
+          Tap a symbol to hear the sound itself, then tap any example word to hear it inside a real word. Symbols play
+          standard IPA recordings of native articulation — consonants are recorded between vowels, the way phonetics
+          references demonstrate them. Diphthongs (and American /ɝ/) have no single reference recording, so they are
+          spoken as their key word in the accent selected above, as are all example words.
         </p>
 
         <section className="chart-block">
@@ -130,6 +141,13 @@ export default function PhoneticsPage() {
             onPick={pick}
           />
         ))}
+
+        <p className="hint-text ipa-credit">
+          Symbol recordings:{" "}
+          <a href={RECORDING_CREDIT.href} target="_blank" rel="noreferrer">
+            {RECORDING_CREDIT.text}
+          </a>
+        </p>
       </main>
     </div>
   );
@@ -181,11 +199,7 @@ function PhonemeDetail({ phoneme, accent }: { phoneme: Phoneme | undefined; acce
   if (!phoneme) return null;
   return (
     <div className="ipa-detail">
-      <button
-        className="btn btn-sm"
-        title="Play the sound again"
-        onClick={() => void speakWord(phonemeSpeech(phoneme), accent)}
-      >
+      <button className="btn btn-sm" title="Play the sound again" onClick={() => void pronounce(phoneme, accent)}>
         <Icon name="volume" /> /{phoneme.ipa}/
       </button>
       <div className="ipa-words">

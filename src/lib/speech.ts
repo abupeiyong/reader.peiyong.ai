@@ -312,6 +312,32 @@ export async function speakWord(word: string, accent: Accent = "US"): Promise<vo
   speechSynthesis.speak(u);
 }
 
+// ---------- 现成录音(音标页)----------
+// 音标页放的是 Wikimedia Commons 上的 IPA 标准录音,不走 TTS,所以这里只要一个
+// 「放这个 url」的口子。复用同一个 <audio>:连点时上一段能掐掉,不会两段叠着响。
+
+let recordingAudio: HTMLAudioElement | null = null;
+let recordingGen = 0;
+
+/** 播放一段现成的录音(mp3 直链)。返回 false = 没放出来(404 / 被拦),调用方该兜底 */
+export async function playRecording(url: string): Promise<boolean> {
+  if (!recordingAudio) {
+    recordingAudio = new Audio();
+    recordingAudio.setAttribute("playsinline", ""); // iOS:内联播放
+  }
+  const gen = ++recordingGen;
+  recordingAudio.pause();
+  recordingAudio.src = url;
+  try {
+    await recordingAudio.play();
+    return true;
+  } catch {
+    // 已经被下一次点击接手了(换 src 会让这次 play() 以 AbortError 收场):
+    // 这不是放不出来,别让调用方再兜底念一遍
+    return gen !== recordingGen;
+  }
+}
+
 // ---------- 提示语朗读(专注提醒)----------
 // 和单词发音同一条链路(云端优先、浏览器兜底),但留一个停止口子:
 // 用户点「回去读」关掉卡片时,话也得跟着停。
