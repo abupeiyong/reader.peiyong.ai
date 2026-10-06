@@ -832,6 +832,10 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 }
 .ipa-word:hover { border-color: var(--primary); color: var(--primary); }
 
+/* 录音署名(CC BY-SA 要求) */
+.ipa-credit { margin: 16px 0 0; }
+.ipa-credit a { color: inherit; text-decoration: underline; }
+
 @media (max-width: 720px) {
   /* 手机上元音图窄得多,只留音标,代表词交给展开的例词区 */
   .vowel-plot { height: 260px; margin: 0 20px 10px; }
