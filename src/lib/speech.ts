@@ -313,13 +313,14 @@ export async function speakWord(word: string, accent: Accent = "US"): Promise<vo
 }
 
 // ---------- 现成录音(音标页)----------
-// 音标页放的是 Wikimedia Commons 上的 IPA 标准录音,不走 TTS,所以这里只要一个
-// 「放这个 url」的口子。复用同一个 <audio>:连点时上一段能掐掉,不会两段叠着响。
+// 音标页放的是入库的 IPA 标准录音(public/phonetics/*.mp3,同源静态资源),不走 TTS,
+// 所以这里只要一个「放这个 url」的口子。复用同一个 <audio>:连点时上一段能掐掉,
+// 不会两段叠着响。
 
 let recordingAudio: HTMLAudioElement | null = null;
 let recordingGen = 0;
 
-/** 播放一段现成的录音(mp3 直链)。返回 false = 没放出来(404 / 被拦),调用方该兜底 */
+/** 播放一段现成的录音(mp3)。返回 false = 没放出来(404 / 被拦),调用方该兜底 */
 export async function playRecording(url: string): Promise<boolean> {
   if (!recordingAudio) {
     recordingAudio = new Audio();
