@@ -1,7 +1,7 @@
 // 音标表:英音(RP)/ 美音(GA)各一套元音与双元音,辅音两套共用。
 //
-// 发音怎么来:点音标放的是 Wikimedia Commons 上的 IPA 标准录音(真人发音,见下面
-// RECORDINGS),不再交给 TTS —— IPA 直接丢给 TTS 会被逐字念成「slash i colon slash」,
+// 发音怎么来:点音标放的是 Wikimedia Commons 上的 IPA 标准录音(真人发音,文件已入库在
+// public/phonetics/,见下面 RECORDINGS),不再交给 TTS —— IPA 直接丢给 TTS 会被逐字念成「slash i colon slash」,
 // 退一步用「puh」这类拼法提示念出来的也不是这个音。没有标准录音的(双元音、美音 /ɝ/)
 // 以及录音取不到时,才回退 TTS 念代表词 —— 那至少是个发音正确的真词。
 export interface Phoneme {
@@ -36,18 +36,21 @@ export interface AccentChart {
 }
 
 // Wikimedia Commons 上的 IPA 发音录音(CC BY-SA 3.0,Denelson83 / Peter Isotalo 等录制),
-// 也就是维基百科各个辅音 / 元音条目在用的那几段。取 Commons 转码出来的 mp3:原始文件是
-// ogg,iOS Safari 放不了。路径里那两位是文件名 md5 的前两个字符(Commons 自己的分桶规则,
-// 浏览器里算不出 md5),所以跟文件名一起写死:
-//   md5("Voiceless_bilabial_plosive.ogg") = 51d9... → /5/51/<file>/<file>.mp3
-function commons(bucket: string, file: string): string {
-  return `https://upload.wikimedia.org/wikipedia/commons/transcoded/${bucket[0]}/${bucket}/${file}/${file}.mp3`;
+// 也就是维基百科各个辅音 / 元音条目在用的那几段。文件已经拉下来放在 public/phonetics/,
+// 跟站点一起发出去:反复点同一个音不用每次去 upload.wikimedia.org 取,也不会被它限流。
+// 用的是 Commons 转码出来的 mp3(原始文件是 ogg,iOS Safari 放不了),文件名保持和 Commons
+// 一致,署名在 public/phonetics/CREDITS.txt 里。
+//
+// 要补或者换录音:在这里写上 Commons 的文件名(不带 .ogg),再跑 `npm run fetch:ipa` ——
+// scripts/fetch-ipa-audio.mjs 以这份清单为准去下载并刷新 CREDITS.txt。
+function recording(file: string): string {
+  return `/phonetics/${file}.mp3`;
 }
 
-const CLOSE_FRONT = commons("91", "Close_front_unrounded_vowel.ogg");
-const CLOSE_BACK_ROUNDED = commons("5d", "Close_back_rounded_vowel.ogg");
-const OPEN_BACK = commons("e5", "Open_back_unrounded_vowel.ogg");
-const OPEN_MID_BACK_ROUNDED = commons("02", "Open-mid_back_rounded_vowel.ogg");
+const CLOSE_FRONT = recording("Close_front_unrounded_vowel");
+const CLOSE_BACK_ROUNDED = recording("Close_back_rounded_vowel");
+const OPEN_BACK = recording("Open_back_unrounded_vowel");
+const OPEN_MID_BACK_ROUNDED = recording("Open-mid_back_rounded_vowel");
 
 /**
  * 音标 → 标准录音。键是页面上显示的音标,所以英音 / 美音符号不同的(/iː/ 与 /i/)各记一条,
@@ -61,46 +64,46 @@ const RECORDINGS: Record<string, string> = {
   // 单元音
   "iː": CLOSE_FRONT,
   "i": CLOSE_FRONT,
-  "ɪ": commons("4c", "Near-close_near-front_unrounded_vowel.ogg"),
-  "e": commons("6c", "Close-mid_front_unrounded_vowel.ogg"),
-  "ɛ": commons("71", "Open-mid_front_unrounded_vowel.ogg"),
-  "æ": commons("c9", "Near-open_front_unrounded_vowel.ogg"),
+  "ɪ": recording("Near-close_near-front_unrounded_vowel"),
+  "e": recording("Close-mid_front_unrounded_vowel"),
+  "ɛ": recording("Open-mid_front_unrounded_vowel"),
+  "æ": recording("Near-open_front_unrounded_vowel"),
   "ɑː": OPEN_BACK,
   "ɑ": OPEN_BACK,
-  "ɒ": commons("0a", "Open_back_rounded_vowel.ogg"),
+  "ɒ": recording("Open_back_rounded_vowel"),
   "ɔː": OPEN_MID_BACK_ROUNDED,
   "ɔ": OPEN_MID_BACK_ROUNDED,
-  "ʊ": commons("d5", "Near-close_near-back_rounded_vowel.ogg"),
+  "ʊ": recording("Near-close_near-back_rounded_vowel"),
   "uː": CLOSE_BACK_ROUNDED,
   "u": CLOSE_BACK_ROUNDED,
-  "ʌ": commons("22", "Near-open_central_unrounded_vowel.ogg"),
-  "ɜː": commons("01", "Open-mid_central_unrounded_vowel.ogg"),
-  "ə": commons("d9", "Mid-central_vowel.ogg"),
+  "ʌ": recording("Near-open_central_unrounded_vowel"),
+  "ɜː": recording("Open-mid_central_unrounded_vowel"),
+  "ə": recording("Mid-central_vowel"),
   // 辅音
-  "p": commons("51", "Voiceless_bilabial_plosive.ogg"),
-  "b": commons("2c", "Voiced_bilabial_plosive.ogg"),
-  "t": commons("02", "Voiceless_alveolar_plosive.ogg"),
-  "d": commons("01", "Voiced_alveolar_plosive.ogg"),
-  "k": commons("e3", "Voiceless_velar_plosive.ogg"),
-  "g": commons("b4", "Voiced_velar_plosive.ogg"),
-  "f": commons("33", "Voiceless_labiodental_fricative.ogg"),
-  "v": commons("85", "Voiced_labiodental_fricative.ogg"),
-  "θ": commons("80", "Voiceless_dental_fricative.ogg"),
-  "ð": commons("6a", "Voiced_dental_fricative.ogg"),
-  "s": commons("ac", "Voiceless_alveolar_sibilant.ogg"),
-  "z": commons("c0", "Voiced_alveolar_sibilant.ogg"),
-  "ʃ": commons("cc", "Voiceless_palato-alveolar_sibilant.ogg"),
-  "ʒ": commons("30", "Voiced_palato-alveolar_sibilant.ogg"),
-  "h": commons("da", "Voiceless_glottal_fricative.ogg"),
-  "tʃ": commons("97", "Voiceless_palato-alveolar_affricate.ogg"),
-  "dʒ": commons("e6", "Voiced_palato-alveolar_affricate.ogg"),
-  "m": commons("a9", "Bilabial_nasal.ogg"),
-  "n": commons("29", "Alveolar_nasal.ogg"),
-  "ŋ": commons("39", "Velar_nasal.ogg"),
-  "l": commons("bc", "Alveolar_lateral_approximant.ogg"),
-  "r": commons("33", "Postalveolar_approximant.ogg"),
-  "j": commons("e8", "Palatal_approximant.ogg"),
-  "w": commons("f2", "Voiced_labio-velar_approximant.ogg"),
+  "p": recording("Voiceless_bilabial_plosive"),
+  "b": recording("Voiced_bilabial_plosive"),
+  "t": recording("Voiceless_alveolar_plosive"),
+  "d": recording("Voiced_alveolar_plosive"),
+  "k": recording("Voiceless_velar_plosive"),
+  "g": recording("Voiced_velar_plosive"),
+  "f": recording("Voiceless_labiodental_fricative"),
+  "v": recording("Voiced_labiodental_fricative"),
+  "θ": recording("Voiceless_dental_fricative"),
+  "ð": recording("Voiced_dental_fricative"),
+  "s": recording("Voiceless_alveolar_sibilant"),
+  "z": recording("Voiced_alveolar_sibilant"),
+  "ʃ": recording("Voiceless_palato-alveolar_sibilant"),
+  "ʒ": recording("Voiced_palato-alveolar_sibilant"),
+  "h": recording("Voiceless_glottal_fricative"),
+  "tʃ": recording("Voiceless_palato-alveolar_affricate"),
+  "dʒ": recording("Voiced_palato-alveolar_affricate"),
+  "m": recording("Bilabial_nasal"),
+  "n": recording("Alveolar_nasal"),
+  "ŋ": recording("Velar_nasal"),
+  "l": recording("Alveolar_lateral_approximant"),
+  "r": recording("Postalveolar_approximant"),
+  "j": recording("Palatal_approximant"),
+  "w": recording("Voiced_labio-velar_approximant"),
 };
 
 /** 这个音标的标准录音;没有录音的(双元音、美音 /ɝ/)返回 undefined,由调用方兜底 */
@@ -108,10 +111,12 @@ export function phonemeRecording(ipa: string): string | undefined {
   return RECORDINGS[ipa];
 }
 
-/** 录音来源,页面上要署名(CC BY-SA 要求) */
+/** 录音来源,页面上要署名(CC BY-SA 要求;录音是入库的副本,所以逐个文件的作者也给出) */
 export const RECORDING_CREDIT = {
   text: "Wikimedia Commons · CC BY-SA 3.0",
   href: "https://commons.wikimedia.org/wiki/Category:Phonemes",
+  /** 逐个文件的作者 / 许可,由 npm run fetch:ipa 生成 */
+  filesHref: "/phonetics/CREDITS.txt",
 };
 
 const GB: AccentChart = {

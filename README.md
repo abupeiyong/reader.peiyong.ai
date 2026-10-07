@@ -52,6 +52,9 @@
 - 点音标放的是 Wikimedia Commons 上的 IPA 标准录音(真人发音,CC BY-SA 3.0,页面上署名),
   不走 TTS —— IPA 交给 TTS 会被逐字念成「slash i colon slash」,用「puh」这类拼法提示
   念出来的也不是那个音;录音按英语实际音值挑(`/ʌ/` 用央元音 [ɐ]、`/r/` 用齿后 [ɹ̠])
+- 37 段录音已拉下来入库放在 `public/phonetics/`(共约 1.2 MB,随静态资源发布),
+  运行时不再请求 upload.wikimedia.org;署名清单在 `public/phonetics/CREDITS.txt`。
+  清单以 `src/lib/phonetics.ts` 里的文件名为准,补录音后跑 `npm run fetch:ipa` 同步
 - 没有标准录音的(双元音、美音 `/ɝ/`)和录音取不到时,回退 TTS 念代表词;例词一直走 TTS
 
 **笔记、日历与报告(My Library)**
@@ -84,6 +87,7 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
   显式设过却漏了 `callback_query` 会让评分按钮点了没反应,自检时在原 url 上补齐(不改 url)
 - `OPENAI_BASE_URL` / `DEEPSEEK_BASE_URL` 可在直连与兼容网关间切换
 - `public/standard_fonts` + `public/cmaps` 由 prebuild 钩子从 pdfjs-dist 同步
+- `public/phonetics/*.mp3` 是入库的 IPA 录音,`npm run fetch:ipa` 重拉(不进 prebuild:构建不依赖外网)
 
 ## 目录结构
 ```
@@ -91,5 +95,5 @@ worker/    Hono API + auth.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts
 src/       React 前端(pages/ 页面,components/ 组件,lib/ PDF·TTS·录音·TOC·音标表)
 shared/    前后端共享类型
 migrations/ D1 迁移(0001 MVP … 0015 每日阅读目标)
-scripts/   Playwright 端到端自测(scripts/e2e.mjs)
+scripts/   Playwright 端到端自测(e2e.mjs)、IPA 录音抓取(fetch-ipa-audio.mjs)
 ```
