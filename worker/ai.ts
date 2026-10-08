@@ -4,7 +4,7 @@ import type { Env } from "./env";
 import type { AiCallKind, PageAnalysis, WordExplanation } from "../shared/types";
 import { extractJson } from "./util";
 import { openaiChat, openaiChatStream } from "./openai";
-import { logAiCall, resolveProvider } from "./aiprovider";
+import { logAiCall, resolveProvider, type AiSettingsRow } from "./aiprovider";
 
 // 流式聊天兜底仍用 llama(gpt-oss 流式为 Responses 事件流,解析格式不同,暂不切)
 const CHAT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
@@ -18,6 +18,8 @@ interface LlmOpts {
   maxTokens?: number;
   json?: boolean;
   verbosity?: "low" | "medium" | "high";
+  /** 调用方已经读过的 users AI 设置行;传了就不再查库(见 resolveProvider) */
+  settings?: AiSettingsRow | null;
 }
 
 /**
@@ -31,10 +33,11 @@ export async function llmChat(
   messages: Msg[],
   opts: LlmOpts = {}
 ): Promise<string | null> {
-  const cfg = await resolveProvider(env, userId, kind);
+  const { settings, ...chatOpts } = opts;
+  const cfg = await resolveProvider(env, userId, kind, settings);
   if (!cfg) return null;
   const t0 = Date.now();
-  const text = await openaiChat(cfg, messages, opts);
+  const text = await openaiChat(cfg, messages, chatOpts);
   void logAiCall(env, {
     userId,
     provider: cfg.provider,
@@ -54,9 +57,10 @@ async function runLLM(
   messages: Msg[],
   maxTokens = 1024,
   json = false,
-  verbosity?: "low" | "medium" | "high"
+  verbosity?: "low" | "medium" | "high",
+  settings?: AiSettingsRow | null
 ): Promise<string | null> {
-  const oa = await llmChat(env, userId, kind, messages, { maxTokens, json, verbosity });
+  const oa = await llmChat(env, userId, kind, messages, { maxTokens, json, verbosity, settings });
   if (oa != null) return oa;
   const t0 = Date.now();
   try {
@@ -97,14 +101,16 @@ export async function explainWord(
   userId: string | null,
   word: string,
   sentence: string,
-  level: string
+  level: string,
+  /** 调用方已读过的 users AI 设置行(查词接口会读),传了就少一次 D1 往返 */
+  settings?: AiSettingsRow | null
 ): Promise<WordExplanation> {
   // 精简 prompt + verbosity low:输出 token 是延迟主因,实测比长版快 ~35%。
   // 查词默认还会关掉模型的「思考」(设置页可开),见 aiprovider.applyThinking。
   const prompt = `英语助手,用户水平 ${level}。结合句子解释单词,只返回 JSON:
 {"word":"原词","phonetic":"IPA 音标","pos":"本句词性","meaning_zh":"语境中文释义","meaning_in_context":"这句里的含义,中文1句","collocations":["2-3个常见搭配"],"forms":["主要词形变化"],"examples":["1个短英文例句(附中文)"]}
 单词:"${word}" 句子:"${sentence}"`;
-  const text = await runLLM(env, userId, "explain_word", [{ role: "user", content: prompt }], 500, true, "low");
+  const text = await runLLM(env, userId, "explain_word", [{ role: "user", content: prompt }], 500, true, "low", settings);
   if (text) {
     const parsed = extractJson<WordExplanation>(text);
     if (parsed && parsed.word) return { ...parsed, source: "ai" };

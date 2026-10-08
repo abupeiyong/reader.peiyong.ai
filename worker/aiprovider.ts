@@ -71,6 +71,8 @@ export interface ProviderConfig {
 
 /** users 表里与 AI 提供商相关的几列 */
 export interface AiSettingsRow {
+  /** 不是提供商设置,但顺带一起读:查词链路本来要为它单独打一次 D1 */
+  english_level: string | null;
   ai_provider: string | null;
   /** 迁移 0013 之前的单列模型;现在只当老数据的兜底读,不再写 */
   ai_model: string | null;
@@ -137,7 +139,7 @@ export async function withAiSchema<T>(env: Env, run: () => Promise<T>): Promise<
 export function loadAiSettings(env: Env, userId: string): Promise<AiSettingsRow | null> {
   return withAiSchema(env, () =>
     env.DB.prepare(
-      `SELECT ai_provider, ai_model, ai_model_openai, ai_model_deepseek,
+      `SELECT english_level, ai_provider, ai_model, ai_model_openai, ai_model_deepseek,
               openai_api_key, deepseek_api_key, ai_word_thinking, ai_word_think_level
          FROM users WHERE id = ?`
     )
@@ -283,13 +285,16 @@ export function applyThinking(cfg: ProviderConfig, level: ThinkLevel | undefined
  * 该用户这次调用该用哪家/哪个模型/哪把 key;没有可用 key 返回 null。
  * 每次 AI 任务(查词 / 本页解析 / 对话)都会各调一次,所以 random 是按任务随机,不是按会话。
  * 传了 kind 时顺带决定这次要不要思考:目前只有查词可配,其余场景保持原有行为。
+ * settings 传了(含 null)就直接用,不再查库:调用方已经读过 users 行时省一次 D1 往返。
  */
 export async function resolveProvider(
   env: Env,
   userId: string | null,
-  kind?: AiCallKind
+  kind?: AiCallKind,
+  settings?: AiSettingsRow | null
 ): Promise<ProviderConfig | null> {
-  const row = userId ? await loadAiSettings(env, userId).catch(() => null) : null;
+  const row =
+    settings !== undefined ? settings : userId ? await loadAiSettings(env, userId).catch(() => null) : null;
   const choice = activeChoice(row);
   const cfg = choice === RANDOM_PROVIDER ? randomConfig(env, row) : providerConfig(env, row, choice);
   return cfg && applyThinking(cfg, kind === "explain_word" ? wordThinkLevel(row) : undefined);
