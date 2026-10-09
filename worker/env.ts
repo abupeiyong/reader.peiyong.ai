@@ -6,6 +6,8 @@ export interface Env {
   ASSETS: Fetcher;
   APP_ENV: string;
   APP_ORIGIN: string;
+  // 会话 JWT 的签名密钥(wrangler secret);没配时复用 TELEGRAM_WEBHOOK_SECRET / BOT_TOKEN,见 jwt.ts
+  SESSION_SECRET?: string;
   // OpenAI 兼容接入(查词/解析/对话优先用 gpt-5-nano,未配置则回退 Workers AI)
   OPENAI_API_KEY?: string;
   OPENAI_BASE_URL?: string;   // 默认 https://api.openai.com/v1;可指向兼容网关

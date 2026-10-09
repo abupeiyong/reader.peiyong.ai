@@ -148,6 +148,45 @@ export function loadAiSettings(env: Env, userId: string): Promise<AiSettingsRow 
   );
 }
 
+// 查词链路上的 users 行快照。站点只有站长一个账号,英语水平和 AI 提供商设置几乎不变,
+// 而每次查词都为它打一次 D1 —— 那段延迟 AI 统计页看不到,正是「统计都快、体感慢」的来源。
+// 所以按隔离实例缓存一周:冷启动后第一次查词读一次,之后不再等库;过了一周也先用旧值、
+// 后台刷新。设置页改完会主动失效(invalidateAiSettings),不用等这一周。
+const SETTINGS_TTL_MS = 7 * 24 * 3600 * 1000;
+const settingsCache = new Map<string, { at: number; row: AiSettingsRow | null }>();
+
+async function refreshAiSettings(env: Env, userId: string): Promise<AiSettingsRow | null> {
+  try {
+    const row = await loadAiSettings(env, userId);
+    settingsCache.set(userId, { at: now(), row });
+    return row;
+  } catch (e) {
+    // 读失败不写缓存(否则一周里都当成「没有设置」),有旧值就继续用旧值
+    console.warn("AI 设置读取失败:", (e as Error).message);
+    return settingsCache.get(userId)?.row ?? null;
+  }
+}
+
+/** 设置页写过 users 之后调一次,下次查词重新读 */
+export function invalidateAiSettings(userId: string): void {
+  settingsCache.delete(userId);
+}
+
+/**
+ * 缓存版 loadAiSettings:有缓存就直接返回(不等 D1),过期的那次在后台刷新。
+ * bg 用来把刷新挂到 waitUntil 上,免得响应结束时被取消。
+ */
+export async function cachedAiSettings(
+  env: Env,
+  userId: string,
+  bg: (p: Promise<unknown>) => void
+): Promise<AiSettingsRow | null> {
+  const hit = settingsCache.get(userId);
+  if (!hit) return refreshAiSettings(env, userId);
+  if (now() - hit.at >= SETTINGS_TTL_MS) bg(refreshAiSettings(env, userId));
+  return hit.row;
+}
+
 export function userKey(row: AiSettingsRow | null, p: AiProviderId): string {
   return ((p === "deepseek" ? row?.deepseek_api_key : row?.openai_api_key) ?? "").trim();
 }

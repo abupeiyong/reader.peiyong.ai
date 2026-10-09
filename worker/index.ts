@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env, Vars } from "./env";
 import { authRoutes, requireAuth } from "./auth";
-import { uid, now, tokenizeWords, fnv1aHex } from "./util";
+import { uid, now, tokenizeWords } from "./util";
 import { explainWord, analyzePage, chatStream, transcribeAudio, embedTexts, ocrImage } from "./ai";
 import { speechMp3 } from "./tts";
 import { estimateVocabRank, hintsForText, priorRank } from "./vocabmodel";
@@ -17,8 +17,10 @@ import {
   RANDOM_PROVIDER,
   activeChoice,
   activeModel,
+  cachedAiSettings,
   envKey,
   envModel,
+  invalidateAiSettings,
   isProviderChoice,
   isProviderId,
   isThinkLevel,
@@ -145,6 +147,7 @@ api.patch("/me", async (c) => {
   if (sets.length) {
     vals.push(c.get("userId"));
     await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+    invalidateAiSettings(c.get("userId")); // 查词用的是 users 行的缓存快照,改完立刻生效
   }
   return c.json({ ok: true });
 });
@@ -670,6 +673,7 @@ api.post("/ai/settings", async (c) => {
     await withAiSchema(c.env, () =>
       c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run()
     );
+    invalidateAiSettings(userId); // 同上:查词读的是缓存快照
   }
   return c.json({ ok: true });
 });
@@ -860,23 +864,11 @@ api.post("/ai/explain-word", async (c) => {
   const body = await c.req.json<{ word: string; sentence: string; book_id?: string; page_no?: number }>();
   if (!body.word) return c.json({ error: "缺少单词" }, 400);
 
-  // 缓存键:同一 (单词, 原句, 水平) 直接复用,重复查询免 AI 调用
-  const cacheWord = body.word.trim().toLowerCase();
-  const sentenceNorm = (body.sentence ?? "").trim().replace(/\s+/g, " ");
-  const sentenceHash = sentenceNorm ? fnv1aHex(sentenceNorm) : "-";
-
   // 查词里「不是 AI」的那部分耗时几乎全是 D1 往返,而 AI 统计页只记提供商那一段,
-  // 所以统计全是快的、体感却慢。users 行(水平 + AI 提供商设置)和缓存行互不依赖,
-  // 一起发出去,两趟并成一趟;缓存行不带 level 过滤(否则要先等 users 回来),
-  // 取该 (词, 句) 的几行再按水平挑 —— 主键前缀命中,仍是一次索引查找。
-  const [settings, cachedRows] = await Promise.all([
-    loadAiSettings(c.env, userId).catch(() => null),
-    c.env.DB
-      .prepare("SELECT level, explanation_json FROM word_exp_cache WHERE word = ? AND sentence_hash = ?")
-      .bind(cacheWord, sentenceHash)
-      .all<{ level: string; explanation_json: string }>()
-      .catch(() => null),
-  ]);
+  // 所以统计全是快的、体感却慢。这条链路上的库读取已经全部去掉:
+  // 登录态验的是签名令牌(见 jwt.ts),英语水平和 AI 设置走隔离内的周缓存,
+  // 解释也不再查 word_exp_cache —— 每次都现问,省掉那次等待(每句话的解释本来就少有重复)。
+  const settings = await cachedAiSettings(c.env, userId, (p) => c.executionCtx.waitUntil(p));
   const level = settings?.english_level ?? "intermediate";
   const dbMs = Date.now() - t0;
 
@@ -891,31 +883,9 @@ api.post("/ai/explain-word", async (c) => {
   );
   void logActivity(c.env, userId, "lookup", body.book_id ?? null, body.page_no ?? null);
 
-  const cached = cachedRows?.results.find((r) => r.level === level);
-  if (cached) {
-    try {
-      const hit = JSON.parse(cached.explanation_json) as WordExplanation;
-      return c.json(hit, 200, { "Server-Timing": serverTiming(dbMs, 0, t0) });
-    } catch {
-      /* 缓存损坏则重新生成 */
-    }
-  }
-
   const tAi = Date.now();
   const exp = await explainWord(c.env, userId, body.word, body.sentence ?? "", level, settings);
-  const aiMs = Date.now() - tAi;
-  if (exp.source !== "mock") {
-    c.executionCtx.waitUntil(
-      c.env.DB.prepare(
-        `INSERT INTO word_exp_cache (word, sentence_hash, level, explanation_json, created_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(word, sentence_hash, level) DO UPDATE SET explanation_json = excluded.explanation_json, created_at = excluded.created_at`
-      )
-        .bind(cacheWord, sentenceHash, level, JSON.stringify(exp), now())
-        .run()
-        .catch((e) => console.warn("查词缓存写入失败:", (e as Error).message))
-    );
-  }
-  return c.json(exp, 200, { "Server-Timing": serverTiming(dbMs, aiMs, t0) });
+  return c.json(exp, 200, { "Server-Timing": serverTiming(dbMs, Date.now() - tAi, t0) });
 });
 
 // ---------- 生词本 ----------
