@@ -44,8 +44,10 @@
 - SM-2 间隔重复闪卡
 
 **语音**
-- 单词/逐句朗读用 ElevenLabs `eleven_v3`(melotts/浏览器兜底)
-- 音频缓存在 R2(`tts/<口音>[-音色指纹]/<文本 sha256>.mp3`):同一句全局复用,
+- 单词/短语发音用有道词典录音(`dict.youdao.com/dictvoice`,美音 `type=2` / 英音 `type=1`),
+  查不到音的词(有道返回 500)回退 ElevenLabs;经 `/api/word-audio` 代理,不写 R2
+- 逐句/段落朗读用 ElevenLabs `eleven_v3`(melotts/浏览器兜底)
+- TTS 音频缓存在 R2(`tts/<口音>[-音色指纹]/<文本 sha256>.mp3`):同一句全局复用,
   命中约 10ms(未命中约 3-4s);换音色自动分桶,melotts 兜底结果不缓存
 
 **音标(`#/phonetics`)**
@@ -93,7 +95,7 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 
 ## 目录结构
 ```
-worker/    Hono API + auth.ts / jwt.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / tts.ts / telegram.ts / vocabmodel.ts / review.ts
+worker/    Hono API + auth.ts / jwt.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / youdao.ts / tts.ts / telegram.ts / vocabmodel.ts / review.ts
 src/       React 前端(pages/ 页面,components/ 组件,lib/ PDF·TTS·录音·TOC·音标表)
 shared/    前后端共享类型
 migrations/ D1 迁移(0001 MVP … 0015 每日阅读目标)
