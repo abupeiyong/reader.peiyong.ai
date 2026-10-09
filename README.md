@@ -30,7 +30,9 @@
   gpt-5 系列把档位直接当 `reasoning_effort`(off = 最低档),DeepSeek 只分思不思考 —— off 时把
   `deepseek-reasoner` 换成 `deepseek-chat`;只影响查词,本页解析与对话不变
 - AI 统计页(`#/ai-stats`)按提供商/模型对比响应延迟(中位数/均值/p95;流式对话记首个 token 的延迟)
-- 语境化查词:音标、词性、释义、语境含义、搭配、词形、例句 —— 全部保存供复习
+- 语境化查词:音标、词性、释义、语境含义、搭配、词形、例句 —— 全部保存供复习。
+  这条链路上不读 D1:登录态验签名令牌(`worker/jwt.ts`),英语水平和 AI 设置按隔离实例缓存一周,
+  解释不走缓存表每次现问;响应的 `Server-Timing` 里有 db / ai / total 分解
 - 本页解析:生词、短语、长难句、背景知识
 - 流式对话,范围可切(选中/本页/整本书),`[p.N]` 页码引用可点击跳回原文
 - 整本书问答走 Vectorize(bge-m3,中文提问查英文原文)
@@ -79,7 +81,7 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 - 本地:`npm run dev`(用 `wrangler.dev.jsonc`,无 AI 绑定 → 离线 mock)
 - 部署:`npm run deploy`;迁移 0001–0015(`npm run db:migrate:remote`)
   —— 0011 / 0012 / 0013 / 0014 / 0015 漏跑时 AI 设置/统计、每日目标接口会在首次报「列/表不存在」时自行补建,不至于整页打不开
-- Secret:`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`(可选,也可在设置页填)、`ELEVENLABS_API_KEY`、`TELEGRAM_BOT_TOKEN`、
+- Secret:`SESSION_SECRET`(会话 JWT 的签名密钥;没配时复用 `TELEGRAM_WEBHOOK_SECRET` / `TELEGRAM_BOT_TOKEN`)、`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`(可选,也可在设置页填)、`ELEVENLABS_API_KEY`、`TELEGRAM_BOT_TOKEN`、
   `TELEGRAM_WEBHOOK_SECRET`、`TELEGRAM_OWNER_CHAT_ID`(可选,限定唯一可登录的 chat)
 - 本地开发(`APP_ENV != production`)保留邮箱直登,供 e2e 用;生产环境自动禁用
 - Vectorize 索引 `reader-vec`(1024 维,cosine),部署前创建一次
@@ -91,7 +93,7 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 
 ## 目录结构
 ```
-worker/    Hono API + auth.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / tts.ts / telegram.ts / vocabmodel.ts / review.ts
+worker/    Hono API + auth.ts / jwt.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / tts.ts / telegram.ts / vocabmodel.ts / review.ts
 src/       React 前端(pages/ 页面,components/ 组件,lib/ PDF·TTS·录音·TOC·音标表)
 shared/    前后端共享类型
 migrations/ D1 迁移(0001 MVP … 0015 每日阅读目标)

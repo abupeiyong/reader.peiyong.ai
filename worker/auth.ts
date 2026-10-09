@@ -6,6 +6,7 @@ import type { Env, Vars } from "./env";
 import { uid, now } from "./util";
 import { telegramEnabled, sendMessage, getBotUsername } from "./telegram";
 import { issueLoginCode, verifyLoginCode, ownerChatId, chatAllowed, CODE_TTL } from "./logincode";
+import { looksLikeJwt, signSessionJwt, verifySessionJwt } from "./jwt";
 
 const SESSION_TTL = 30 * 24 * 3600 * 1000; // 30 天
 const RENEW_AFTER = SESSION_TTL / 2;       // 剩余不足一半时滑动续期
@@ -18,7 +19,13 @@ function devLoginEnabled(env: Env): boolean {
   return env.APP_ENV !== "production";
 }
 
+/**
+ * 会话 token。默认签一张 JWT:之后每次请求验签即可,不用查 sessions 表。
+ * 没有签名密钥时(生产未配任何 secret)退回库里的随机会话,行为与改动前一致。
+ */
 async function createSession(env: Env, userId: string): Promise<string> {
+  const jwt = await signSessionJwt(env, userId, SESSION_TTL);
+  if (jwt) return jwt;
   const token = uid("sess");
   await env.DB.prepare("INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
     .bind(token, userId, now() + SESSION_TTL, now())
@@ -136,7 +143,10 @@ authRoutes.post("/dev-login", async (c) => {
 authRoutes.post("/logout", async (c) => {
   const token = getCookie(c, COOKIE);
   if (token) {
-    await c.env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
+    // 签名令牌在库里没有行可删,删 cookie 即可(令牌本身到 exp 才失效,见 jwt.ts)
+    if (!looksLikeJwt(token)) {
+      await c.env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
+    }
     deleteCookie(c, COOKIE, { path: "/" });
   }
   return c.json({ ok: true });
@@ -148,12 +158,45 @@ import { createMiddleware } from "hono/factory";
 export const requireAuth = createMiddleware<{ Bindings: Env; Variables: Vars }>(async (c, next) => {
   const token = getCookie(c, COOKIE);
   if (!token) return c.json({ error: "unauthorized" }, 401);
+
+  // 签名令牌:验签 + 看过期,一次 D1 都不用
+  if (looksLikeJwt(token)) {
+    const claims = await verifySessionJwt(c.env, token);
+    if (!claims) return c.json({ error: "unauthorized" }, 401);
+    c.set("userId", claims.sub);
+    await next();
+
+    // 剩余不足一半时换一张新令牌(同样不写库)
+    if (claims.exp - now() >= RENEW_AFTER) return;
+    const fresh = await signSessionJwt(c.env, claims.sub, SESSION_TTL);
+    if (!fresh) return;
+    try {
+      c.res.headers.append("Set-Cookie", sessionCookieHeader(c, fresh));
+    } catch {
+      // 少数路由的响应头不可写(流式/文件),这次不续,下次请求再续
+    }
+    return;
+  }
+
+  // 换成 JWT 之前签发的随机 token:仍按库里查,30 天内自然过完
   const row = await c.env.DB.prepare("SELECT user_id, expires_at FROM sessions WHERE token = ?")
     .bind(token)
     .first<{ user_id: string; expires_at: number }>();
   if (!row || row.expires_at < now()) return c.json({ error: "unauthorized" }, 401);
   c.set("userId", row.user_id);
   await next();
+
+  // 老会话直接换成签名令牌:下一个请求起就不用再查 sessions 了。
+  // 签不出来(没有密钥)时保持原来的滑动续期逻辑。
+  const upgraded = await signSessionJwt(c.env, row.user_id, SESSION_TTL);
+  if (upgraded) {
+    try {
+      c.res.headers.append("Set-Cookie", sessionCookieHeader(c, upgraded));
+    } catch {
+      // 响应头不可写(流式/文件):这次不换,下次请求再换
+    }
+    return;
+  }
 
   // 剩余不足一半时往后顺延 30 天。先补 Set-Cookie 再写库:
   // 少数路由返回的响应头不可写(流式/文件),那种情况下这次不续,下次请求再续,
