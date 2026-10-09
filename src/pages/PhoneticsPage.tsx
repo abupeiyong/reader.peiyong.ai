@@ -1,7 +1,7 @@
 // 音标学习页(#/phonetics):英音 / 美音切换,元音画在元音图上按舌位摆,
 // 辅音按发音方式分组。点音标出声并展开例词,点例词逐词朗读。
 // 音标放的是入库的 IPA 标准录音(public/phonetics/,来自 Wikimedia Commons),没有录音的
-// 音标和例词才走查词那条 TTS 链路(ElevenLabs → melotts → 浏览器合成)。
+// 音标和例词才走查词那条发音链路(有道词典录音 → ElevenLabs → melotts → 浏览器合成)。
 import { useState } from "react";
 import { Icon } from "../components/Icon";
 import { playRecording, speakWord, type Accent } from "../lib/speech";

@@ -3,7 +3,7 @@ import type { Env, Vars } from "./env";
 import { authRoutes, requireAuth } from "./auth";
 import { uid, now, tokenizeWords } from "./util";
 import { explainWord, analyzePage, chatStream, transcribeAudio, embedTexts, ocrImage } from "./ai";
-import { speechMp3 } from "./tts";
+import { speechMp3, wordMp3 } from "./tts";
 import { estimateVocabRank, hintsForText, priorRank } from "./vocabmodel";
 import type { ReviewGrade } from "../shared/srs";
 import { gradeVocab } from "./review";
@@ -778,6 +778,18 @@ api.get("/tts", async (c) => {
   const audio = await speechMp3(c.env, text, accent, (p) => c.executionCtx.waitUntil(p));
   if (!audio) return c.json({ error: "TTS 不可用" }, 503);
   return new Response(audio as unknown as BodyInit, { headers });
+});
+
+// 单词/短语发音:有道词典录音优先,取不到再回退 TTS 链路(句子/段落仍走 /tts)
+api.get("/word-audio", async (c) => {
+  const word = (c.req.query("word") ?? "").slice(0, 64);
+  if (!word.trim()) return c.json({ error: "缺少单词" }, 400);
+  const accent = c.req.query("accent") === "GB" ? "GB" : "US";
+  const audio = await wordMp3(c.env, word, accent, (p) => c.executionCtx.waitUntil(p));
+  if (!audio) return c.json({ error: "发音不可用" }, 503);
+  return new Response(audio as unknown as BodyInit, {
+    headers: { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" },
+  });
 });
 
 api.post("/speech/stt", async (c) => {

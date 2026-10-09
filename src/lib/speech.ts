@@ -1,11 +1,15 @@
 // 朗读(TTS):优先云端 /api/tts(后端接 ElevenLabs eleven_v3),
 // 不可用时回退浏览器 speechSynthesis。段落逐句播放以保持句级高亮同步。
+// 单词/短语发音单独走 /api/word-audio(有道词典录音优先,取不到才落回同一条 TTS 链路)。
 
 export type Accent = "US" | "GB";
 
-// ---------- 云端音频(ElevenLabs)----------
+// ---------- 云端音频(单词走有道,句子走 ElevenLabs)----------
 
-const audioCache = new Map<string, string>(); // `${accent}:${text}` -> objectURL
+/** 单词/短语(词典录音)和句子(TTS 合成)走不同接口,缓存也分开 */
+type AudioKind = "sentence" | "word";
+
+const audioCache = new Map<string, string>(); // `${kind}:${accent}:${text}` -> objectURL
 const inflight = new Map<string, Promise<string | null>>(); // 同一句同时被预取和播放时只发一次请求
 const MAX_CACHED = 300;                                     // 超出后按插入顺序淘汰,释放 objectURL
 let cloudTtsAvailable = true;
@@ -21,9 +25,17 @@ function rememberAudio(key: string, url: string) {
   }
 }
 
-async function fetchTtsUrl(text: string, accent: Accent): Promise<string | null> {
-  if (!cloudTtsAvailable || !text.trim()) return null;
-  const key = `${accent}:${text}`;
+function audioEndpoint(text: string, accent: Accent, kind: AudioKind): string {
+  return kind === "word"
+    ? `/api/word-audio?accent=${accent}&word=${encodeURIComponent(text.slice(0, 64))}`
+    : `/api/tts?accent=${accent}&text=${encodeURIComponent(text.slice(0, 800))}`;
+}
+
+async function fetchAudioUrl(text: string, accent: Accent, kind: AudioKind = "sentence"): Promise<string | null> {
+  if (!text.trim()) return null;
+  // 句子全站没有 TTS provider 时就别再试了;单词那条有道不要密钥,每次都值得试一下
+  if (kind === "sentence" && !cloudTtsAvailable) return null;
+  const key = `${kind}:${accent}:${text}`;
   const cached = audioCache.get(key);
   if (cached) return cached;
   const pending = inflight.get(key);
@@ -31,9 +43,9 @@ async function fetchTtsUrl(text: string, accent: Accent): Promise<string | null>
 
   const task = (async () => {
     try {
-      const res = await fetch(`/api/tts?accent=${accent}&text=${encodeURIComponent(text.slice(0, 800))}`);
+      const res = await fetch(audioEndpoint(text, accent, kind));
       if (!res.ok) {
-        if (res.status === 503) cloudTtsAvailable = false; // 服务端无任何 TTS provider
+        if (res.status === 503 && kind === "sentence") cloudTtsAvailable = false; // 服务端无任何 TTS provider
         return null;
       }
       const blob = await res.blob();
@@ -204,7 +216,7 @@ export function speakSentences(sentences: string[], opts: TtsOptions): TtsContro
       return;
     }
     const cur = idx;
-    const url = await fetchTtsUrl(sentences[cur], opts.accent);
+    const url = await fetchAudioUrl(sentences[cur], opts.accent);
     if (stopped) return;
     if (!url) {
       if (mode === "pending") {
@@ -223,7 +235,7 @@ export function speakSentences(sentences: string[], opts: TtsOptions): TtsContro
     mode = "cloud";
     current = "cloud";
     opts.onSentence?.(cur);
-    if (cur + 1 < sentences.length) void fetchTtsUrl(sentences[cur + 1], opts.accent); // 预取
+    if (cur + 1 < sentences.length) void fetchAudioUrl(sentences[cur + 1], opts.accent); // 预取
     await unlocked; // 等解锁的那一小段静音收尾,免得两次 play() 打架
     if (stopped) return;
     audio = claimSentenceAudio(owner);
@@ -289,12 +301,12 @@ export function speakSentences(sentences: string[], opts: TtsOptions): TtsContro
 
 /** 预取单词发音(与查词并行发起):音频进内存缓存,点发音时零等待 */
 export function prefetchWordAudio(word: string, accent: Accent = "US"): void {
-  void fetchTtsUrl(word, accent);
+  void fetchAudioUrl(word, accent, "word");
 }
 
-/** 朗读单词/短语:优先云端(ElevenLabs),回退浏览器 */
+/** 朗读单词/短语:优先云端(有道词典录音 → ElevenLabs),回退浏览器 */
 export async function speakWord(word: string, accent: Accent = "US"): Promise<void> {
-  const url = await fetchTtsUrl(word, accent);
+  const url = await fetchAudioUrl(word, accent, "word");
   if (url) {
     try {
       await new Audio(url).play();
@@ -351,7 +363,7 @@ let noticeGen = 0; // 取音频要等网络,期间卡片可能已经关了 —�
 export async function speakNotice(text: string, accent: Accent = "US"): Promise<void> {
   stopNotice();
   const gen = noticeGen;
-  const url = await fetchTtsUrl(text, accent);
+  const url = await fetchAudioUrl(text, accent);
   if (gen !== noticeGen) return;
   if (url) {
     const el = new Audio(url);

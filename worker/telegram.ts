@@ -5,7 +5,7 @@ import type { WordExplanation } from "../shared/types";
 import { explainWord, llmChat } from "./ai";
 import { now } from "./util";
 import { issueLoginCode, chatAllowed } from "./logincode";
-import { speechMp3 } from "./tts";
+import { wordMp3 } from "./tts";
 import { gradeVocab } from "./review";
 import { fmtDay, fmtInterval, type ReviewGrade } from "../shared/srs";
 
@@ -252,7 +252,7 @@ async function sendWordCard(
 ): Promise<void> {
   const caption = wordCard(row, exp, idx, total);
   const markup = gradeKeyboard(row.id);
-  const audio = await speechMp3(env, row.word, "US").catch(() => null);
+  const audio = await wordMp3(env, row.word, "US").catch(() => null);
   if (audio) {
     try {
       const form = new FormData();
