@@ -4,7 +4,13 @@ import type { Env } from "./env";
 import type { AiCallKind, PageAnalysis, WordExplanation } from "../shared/types";
 import { extractJson } from "./util";
 import { openaiChat, openaiChatStream } from "./openai";
-import { logAiCall, resolveProvider, type AiSettingsRow } from "./aiprovider";
+import {
+  logAiCall,
+  resolveProvider,
+  NO_KEY_PROVIDER,
+  NO_KEY_REASON,
+  type AiSettingsRow,
+} from "./aiprovider";
 
 // 流式聊天兜底仍用 llama(gpt-oss 流式为 Responses 事件流,解析格式不同,暂不切)
 const CHAT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
@@ -22,22 +28,40 @@ interface LlmOpts {
   settings?: AiSettingsRow | null;
 }
 
+/** 一次生成的结果;text 为 null 时 reason 说明为什么只能回退到离线模拟 */
+interface LlmResult {
+  text: string | null;
+  reason: string | null;
+}
+
 /**
- * 只走用户选定的提供商(OpenAI / DeepSeek),不回退 Workers AI;不可用返回 null。
- * 每次调用都把延迟记进 ai_calls,供 AI 统计页对比两家。
+ * 只走用户选定的提供商(OpenAI / DeepSeek),不回退 Workers AI。
+ * 每次调用都把延迟记进 ai_calls,供 AI 统计页对比两家;失败连原因一起记。
+ * 连 key 都没有时也记一行(provider = none):否则这次失败在统计页里完全看不见。
  */
-export async function llmChat(
+async function providerChat(
   env: Env,
   userId: string | null,
   kind: AiCallKind,
   messages: Msg[],
   opts: LlmOpts = {}
-): Promise<string | null> {
+): Promise<LlmResult> {
   const { settings, ...chatOpts } = opts;
   const cfg = await resolveProvider(env, userId, kind, settings);
-  if (!cfg) return null;
+  if (!cfg) {
+    void logAiCall(env, {
+      userId,
+      provider: NO_KEY_PROVIDER,
+      model: "-",
+      kind,
+      latencyMs: 0,
+      ok: false,
+      error: NO_KEY_REASON,
+    });
+    return { text: null, reason: NO_KEY_REASON };
+  }
   const t0 = Date.now();
-  const text = await openaiChat(cfg, messages, chatOpts);
+  const { text, error } = await openaiChat(cfg, messages, chatOpts);
   void logAiCall(env, {
     userId,
     provider: cfg.provider,
@@ -45,11 +69,23 @@ export async function llmChat(
     kind,
     latencyMs: Date.now() - t0,
     ok: text != null,
+    error,
   });
-  return text;
+  return { text, reason: text != null ? null : `${cfg.provider}/${cfg.model}:${error ?? "调用失败"}` };
 }
 
-// 文本生成:优先用户选定的提供商 → 回退 Workers AI(gpt-oss-120b)→ null(上层用 mock)
+/** 同 providerChat,只要文本(Telegram 侧用):不可用返回 null */
+export async function llmChat(
+  env: Env,
+  userId: string | null,
+  kind: AiCallKind,
+  messages: Msg[],
+  opts: LlmOpts = {}
+): Promise<string | null> {
+  return (await providerChat(env, userId, kind, messages, opts)).text;
+}
+
+// 文本生成:优先用户选定的提供商 → 回退 Workers AI(gpt-oss-120b)→ text 为 null(上层用 mock)
 async function runLLM(
   env: Env,
   userId: string | null,
@@ -59,9 +95,9 @@ async function runLLM(
   json = false,
   verbosity?: "low" | "medium" | "high",
   settings?: AiSettingsRow | null
-): Promise<string | null> {
-  const oa = await llmChat(env, userId, kind, messages, { maxTokens, json, verbosity, settings });
-  if (oa != null) return oa;
+): Promise<LlmResult> {
+  const oa = await providerChat(env, userId, kind, messages, { maxTokens, json, verbosity, settings });
+  if (oa.text != null) return oa;
   const t0 = Date.now();
   try {
     if (!env.AI) throw new Error("本地开发无 AI 绑定");
@@ -79,6 +115,7 @@ async function runLLM(
     const msg = res?.output?.find((o) => o.type === "message");
     const text = res?.output_text ?? msg?.content?.map((c) => c.text ?? "").join("");
     const out = text?.trim() ? text : null;
+    const error = out == null ? "返回了空内容" : null;
     void logAiCall(env, {
       userId,
       provider: "workers-ai",
@@ -86,12 +123,30 @@ async function runLLM(
       kind,
       latencyMs: Date.now() - t0,
       ok: out != null,
+      error,
     });
-    return out;
+    return { text: out, reason: out != null ? null : fallbackReason(oa.reason, "返回了空内容") };
   } catch (e) {
-    console.warn("Workers AI 不可用,回退 mock:", (e as Error).message);
-    return null;
+    // 抛错的兜底以前只留在 Worker 日志里:统计页一行都没有,页面上却已经是离线模拟了
+    const msg = (e as Error).message;
+    console.warn("Workers AI 不可用,回退 mock:", msg);
+    void logAiCall(env, {
+      userId,
+      provider: "workers-ai",
+      model: FALLBACK_MODEL,
+      kind,
+      latencyMs: Date.now() - t0,
+      ok: false,
+      error: msg,
+    });
+    return { text: null, reason: fallbackReason(oa.reason, msg) };
   }
+}
+
+/** 把「选定提供商为什么不行」和「Workers AI 兜底为什么也不行」串成一句话 */
+function fallbackReason(providerReason: string | null, workersAiError: string): string {
+  const mine = `Workers AI 兜底:${workersAiError}`;
+  return providerReason ? `${providerReason};${mine}` : mine;
 }
 
 // ---------- 单词解释 ----------
@@ -110,21 +165,35 @@ export async function explainWord(
   const prompt = `英语助手,用户水平 ${level}。结合句子解释单词,只返回 JSON:
 {"word":"原词","phonetic":"IPA 音标","pos":"本句词性","meaning_zh":"语境中文释义","meaning_in_context":"这句里的含义,中文1句","collocations":["2-3个常见搭配"],"forms":["主要词形变化"],"examples":["1个短英文例句(附中文)"]}
 单词:"${word}" 句子:"${sentence}"`;
-  const text = await runLLM(env, userId, "explain_word", [{ role: "user", content: prompt }], 500, true, "low", settings);
+  const { text, reason } = await runLLM(
+    env,
+    userId,
+    "explain_word",
+    [{ role: "user", content: prompt }],
+    500,
+    true,
+    "low",
+    settings
+  );
   if (text) {
     const parsed = extractJson<WordExplanation>(text);
     if (parsed && parsed.word) return { ...parsed, source: "ai" };
   }
-  return mockExplainWord(word, sentence);
+  return mockExplainWord(word, sentence, text ? "AI 返回的内容解析不出 JSON" : reason);
 }
 
-function mockExplainWord(word: string, sentence: string): WordExplanation {
+/** 离线模拟那句话里的原因后缀;没有原因(理论上不会)时留空,不写成「(null)」 */
+function reasonSuffix(reason: string | null): string {
+  return reason ? `(${reason})` : "";
+}
+
+function mockExplainWord(word: string, sentence: string, reason: string | null): WordExplanation {
   return {
     word,
     phonetic: `/${word.toLowerCase()}/`,
     pos: "n./v./adj.(离线模式无法判断)",
     meaning_zh: `「${word}」的语境释义(离线模拟)`,
-    meaning_in_context: `离线模拟模式:AI 服务当前不可用。它在句子「${sentence.slice(0, 80)}${sentence.length > 80 ? "…" : ""}」中的含义需联网 AI 生成。部署到 Cloudflare 或登录 wrangler 后将自动启用真实解释。`,
+    meaning_in_context: `离线模拟模式:AI 服务当前不可用${reasonSuffix(reason)}。它在句子「${sentence.slice(0, 80)}${sentence.length > 80 ? "…" : ""}」中的含义需联网 AI 生成。这次失败也记在 AI 统计页。`,
     collocations: [`${word.toLowerCase()} + sth`, `make ${word.toLowerCase()}`],
     forms: [word.toLowerCase(), word.toLowerCase() + "s"],
     examples: [`This is an example sentence with "${word}". (这是一个包含该词的例句。)`],
@@ -153,7 +222,7 @@ export async function analyzePage(
 """
 ${truncated}
 """`;
-  const text = await runLLM(env, userId, "analyze_page", [{ role: "user", content: prompt }], 1600, true);
+  const { text, reason } = await runLLM(env, userId, "analyze_page", [{ role: "user", content: prompt }], 1600, true);
   if (text) {
     const parsed = extractJson<PageAnalysis>(text);
     if (parsed && Array.isArray(parsed.vocabulary)) {
@@ -166,10 +235,10 @@ ${truncated}
       };
     }
   }
-  return mockAnalyzePage(pageText);
+  return mockAnalyzePage(pageText, text ? "AI 返回的内容解析不出 JSON" : reason);
 }
 
-function mockAnalyzePage(pageText: string): PageAnalysis {
+function mockAnalyzePage(pageText: string, reason: string | null): PageAnalysis {
   // 离线模拟:挑选较长的词作为"可能生词",让链路可视化跑通
   const words = [...new Set(pageText.toLowerCase().match(/[a-z]{8,}/g) || [])].slice(0, 8);
   const sentences = pageText
@@ -181,7 +250,7 @@ function mockAnalyzePage(pageText: string): PageAnalysis {
     vocabulary: words.map((w) => ({ word: w, phonetic: "", meaning: "(离线模拟)联网后生成语境释义" })),
     phrases: [],
     sentences: sentences.map((s) => ({ sentence: s, explanation: "(离线模拟)较长句子,联网后生成结构解析" })),
-    background: "离线模拟模式:AI 服务当前不可用,以上为规则挑选的候选生词/长句。部署或登录 wrangler 后自动启用真实分析。",
+    background: `离线模拟模式:AI 服务当前不可用${reasonSuffix(reason)},以上为规则挑选的候选生词/长句。这次失败也记在 AI 统计页。`,
     source: "mock",
   };
 }
@@ -195,13 +264,18 @@ export async function chatStream(
 ): Promise<{ stream: ReadableStream<string>; source: "ai" | "mock" }> {
   // 优先用户选定的提供商(OpenAI / DeepSeek)流式
   const cfg = await resolveProvider(env, userId, "chat");
+  let reason: string | null = null;
   if (cfg) {
     const t0 = Date.now();
-    const oaStream = await openaiChatStream(cfg, messages, 1200);
+    const { stream: oaStream, error } = await openaiChatStream(cfg, messages, 1200);
     if (oaStream) {
       return { stream: logFirstChunk(env, oaStream, { userId, provider: cfg.provider, model: cfg.model }, t0), source: "ai" };
     }
-    void logAiCall(env, { userId, provider: cfg.provider, model: cfg.model, kind: "chat", latencyMs: Date.now() - t0, ok: false, stream: true });
+    void logAiCall(env, { userId, provider: cfg.provider, model: cfg.model, kind: "chat", latencyMs: Date.now() - t0, ok: false, stream: true, error });
+    reason = `${cfg.provider}/${cfg.model}:${error ?? "流式调用失败"}`;
+  } else {
+    void logAiCall(env, { userId, provider: NO_KEY_PROVIDER, model: "-", kind: "chat", latencyMs: 0, ok: false, stream: true, error: NO_KEY_REASON });
+    reason = NO_KEY_REASON;
   }
   // 回退 Workers AI(Llama)流式
   const t1 = Date.now();
@@ -215,8 +289,10 @@ export async function chatStream(
     const wrapped = logFirstChunk(env, parseSSEToText(res), { userId, provider: "workers-ai", model: CHAT_MODEL }, t1);
     return { stream: wrapped, source: "ai" };
   } catch (e) {
-    console.warn("Workers AI 流式不可用,回退 mock:", (e as Error).message);
-    return { stream: mockChatStream(messages), source: "mock" };
+    const msg = (e as Error).message;
+    console.warn("Workers AI 流式不可用,回退 mock:", msg);
+    void logAiCall(env, { userId, provider: "workers-ai", model: CHAT_MODEL, kind: "chat", latencyMs: Date.now() - t1, ok: false, stream: true, error: msg });
+    return { stream: mockChatStream(messages, fallbackReason(reason, msg)), source: "mock" };
   }
 }
 
@@ -285,14 +361,14 @@ function parseSSEToText(input: ReadableStream<Uint8Array>): ReadableStream<strin
   });
 }
 
-function mockChatStream(messages: Msg[]): ReadableStream<string> {
+function mockChatStream(messages: Msg[], reason: string): ReadableStream<string> {
   const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
   const sys = messages.find((m) => m.role === "system")?.content ?? "";
   const pageMatch = sys.match(/第\s*(\d+)\s*页/);
   const page = pageMatch ? pageMatch[1] : "1";
   const reply =
     `(离线模拟回答)你的问题是:「${lastUser.slice(0, 60)}${lastUser.length > 60 ? "…" : ""}」。` +
-    `当前处于离线模拟模式,AI 服务不可用,无法真正分析文档内容。` +
+    `当前处于离线模拟模式,AI 服务不可用(${reason}),无法真正分析文档内容。` +
     `联网部署后,我会结合原文回答并附上引用,例如 [p.${page}] 这样的页码引用可以点击跳回原文。` +
     `你可以尝试:解释这句话、总结本页、考考我。`;
   const chunks = reply.match(/.{1,6}/g) ?? [reply];

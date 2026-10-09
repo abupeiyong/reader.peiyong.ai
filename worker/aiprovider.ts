@@ -85,7 +85,7 @@ export interface AiSettingsRow {
   ai_word_think_level: string | null;
 }
 
-// 迁移 0011 / 0012 / 0013 / 0014 的兜底:部署了新代码但 `npm run db:migrate:remote` 没跑到时,
+// 迁移 0011 / 0012 / 0013 / 0014 / 0016 的兜底:部署了新代码但 `npm run db:migrate:remote` 没跑到时,
 // 这些列/表不存在,设置页和统计页会直接 500(前端只剩一个转不完的 Loading)。
 // 下面的语句只在查询报「列/表不存在」时执行一次,已迁移过的库上永远不会触发。
 const AI_SCHEMA_SQL = [
@@ -106,8 +106,10 @@ const AI_SCHEMA_SQL = [
      latency_ms INTEGER NOT NULL,
      ok INTEGER NOT NULL DEFAULT 1,
      stream INTEGER NOT NULL DEFAULT 0,
-     created_at INTEGER NOT NULL
+     created_at INTEGER NOT NULL,
+     error TEXT
    )`,
+  "ALTER TABLE ai_calls ADD COLUMN error TEXT",
   "CREATE INDEX IF NOT EXISTS idx_ai_calls_user ON ai_calls(user_id, created_at)",
 ];
 
@@ -321,6 +323,15 @@ export function applyThinking(cfg: ProviderConfig, level: ThinkLevel | undefined
 }
 
 /**
+ * 选中的提供商一把可用 key 都没有 —— 这次调用根本没发出去。
+ * 这种「没发出去」以前不落 ai_calls,统计页因此看不到任何失败,只有页面上一句
+ * 「离线模拟模式」(issue #58)。现在按下面这个伪提供商记一行,原因写进 error 列。
+ */
+export const NO_KEY_PROVIDER = "none";
+export const NO_KEY_REASON =
+  "没有可用的 API key:设置页填一个,或部署时配 OPENAI_API_KEY / DEEPSEEK_API_KEY secret";
+
+/**
  * 该用户这次调用该用哪家/哪个模型/哪把 key;没有可用 key 返回 null。
  * 每次 AI 任务(查词 / 本页解析 / 对话)都会各调一次,所以 random 是按任务随机,不是按会话。
  * 传了 kind 时顺带决定这次要不要思考:目前只有查词可配,其余场景保持原有行为。
@@ -350,11 +361,13 @@ export function logAiCall(
     latencyMs: number;
     ok: boolean;
     stream?: boolean;
+    /** ok = false 时的原因,直接显示在统计页的「Recent calls」里 */
+    error?: string | null;
   }
 ) {
   return withAiSchema(env, () =>
     env.DB.prepare(
-      "INSERT INTO ai_calls (user_id, provider, model, kind, latency_ms, ok, stream, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO ai_calls (user_id, provider, model, kind, latency_ms, ok, stream, created_at, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
       .bind(
         row.userId,
@@ -364,7 +377,8 @@ export function logAiCall(
         Math.max(0, Math.round(row.latencyMs)),
         row.ok ? 1 : 0,
         row.stream ? 1 : 0,
-        now()
+        now(),
+        row.ok ? null : (row.error ?? "").slice(0, 300) || null
       )
       .run()
   ).catch((e) => console.warn("ai_calls 记录失败:", (e as Error).message));

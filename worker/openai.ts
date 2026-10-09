@@ -71,7 +71,7 @@ function apiErrorMessage(body: string): string {
 }
 
 /** 一次非流式调用的结果;text 为 null 时 error 是可以展示给用户的失败原因 */
-interface ChatResult {
+export interface ChatResult {
   text: string | null;
   error: string | null;
 }
@@ -103,9 +103,12 @@ async function chatOnce(cfg: ProviderConfig, messages: Msg[], opts: ChatOpts): P
   }
 }
 
-/** 非流式:返回助手文本;失败(含返回空内容)返回 null 让上层回退 */
-export async function openaiChat(cfg: ProviderConfig, messages: Msg[], opts: ChatOpts = {}): Promise<string | null> {
-  return (await chatOnce(cfg, messages, opts)).text;
+/**
+ * 非流式:返回助手文本;失败(含返回空内容)时 text 为 null、error 是原因。
+ * 原因要带回上层:它既记进 ai_calls(统计页的失败行),也写进离线模拟的那句话里。
+ */
+export function openaiChat(cfg: ProviderConfig, messages: Msg[], opts: ChatOpts = {}): Promise<ChatResult> {
+  return chatOnce(cfg, messages, opts);
 }
 
 /**
@@ -119,12 +122,12 @@ export async function openaiProbe(cfg: ProviderConfig): Promise<string | null> {
   return (await chatOnce(cfg, messages, { maxTokens: 256 })).error;
 }
 
-/** 流式:返回纯文本 chunk 流;不可用返回 null 让上层回退 */
+/** 流式:返回纯文本 chunk 流;不可用时 stream 为 null、error 是原因(同 openaiChat) */
 export async function openaiChatStream(
   cfg: ProviderConfig,
   messages: Msg[],
   maxTokens = 1200
-): Promise<ReadableStream<string> | null> {
+): Promise<{ stream: ReadableStream<string> | null; error: string | null }> {
   try {
     const res = await fetch(chatUrl(cfg), {
       method: "POST",
@@ -132,13 +135,14 @@ export async function openaiChatStream(
       body: JSON.stringify(chatBody(cfg, messages, { maxTokens }, true)),
     });
     if (!res.ok || !res.body) {
-      console.warn(`${cfg.provider} stream 失败:`, res.status, (await res.text().catch(() => "")).slice(0, 300));
-      return null;
+      const body = (await res.text().catch(() => "")).slice(0, 300);
+      console.warn(`${cfg.provider} stream 失败:`, res.status, body);
+      return { stream: null, error: `HTTP ${res.status}:${apiErrorMessage(body)}` };
     }
-    return parseOpenAISSE(res.body);
+    return { stream: parseOpenAISSE(res.body), error: null };
   } catch (e) {
     console.warn(`${cfg.provider} stream 异常:`, (e as Error).message);
-    return null;
+    return { stream: null, error: (e as Error).message };
   }
 }
 
