@@ -772,6 +772,8 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .ai-bar-cell { width: 28%; }
 .ai-bar { display: block; height: 8px; border-radius: 4px; background: var(--primary); }
 .ai-failed { color: var(--danger); font-size: 12px; }
+/* 失败原因(没有 key / 提供商原话 / Workers AI 兜底报错)跟在 failed 后面 */
+.ai-error { display: block; color: var(--muted); font-size: 12px; line-height: 1.4; max-width: 420px; }
 .ai-note { margin: 10px 0 0; }
 
 /* ---------- 音标学习页 ---------- */

@@ -200,6 +200,8 @@ export interface AiCallLog {
   ok: number;
   stream: number;
   created_at: number;
+  /** ok = 0 时的失败原因(提供商原话 / 没有 key / Workers AI 兜底报错);成功为 null */
+  error: string | null;
 }
 
 export interface AiStats {

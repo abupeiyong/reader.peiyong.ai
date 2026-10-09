@@ -81,8 +81,8 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 
 ## 开发 / 部署
 - 本地:`npm run dev`(用 `wrangler.dev.jsonc`,无 AI 绑定 → 离线 mock)
-- 部署:`npm run deploy`;迁移 0001–0015(`npm run db:migrate:remote`)
-  —— 0011 / 0012 / 0013 / 0014 / 0015 漏跑时 AI 设置/统计、每日目标接口会在首次报「列/表不存在」时自行补建,不至于整页打不开
+- 部署:`npm run deploy`;迁移 0001–0016(`npm run db:migrate:remote`)
+  —— 0011 / 0012 / 0013 / 0014 / 0015 / 0016 漏跑时 AI 设置/统计、每日目标接口会在首次报「列/表不存在」时自行补建,不至于整页打不开
 - Secret:`SESSION_SECRET`(会话 JWT 的签名密钥;没配时复用 `TELEGRAM_WEBHOOK_SECRET` / `TELEGRAM_BOT_TOKEN`)、`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`(可选,也可在设置页填)、`ELEVENLABS_API_KEY`、`TELEGRAM_BOT_TOKEN`、
   `TELEGRAM_WEBHOOK_SECRET`、`TELEGRAM_OWNER_CHAT_ID`(可选,限定唯一可登录的 chat)
 - 本地开发(`APP_ENV != production`)保留邮箱直登,供 e2e 用;生产环境自动禁用
@@ -98,6 +98,6 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 worker/    Hono API + auth.ts / jwt.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / youdao.ts / tts.ts / telegram.ts / vocabmodel.ts / review.ts
 src/       React 前端(pages/ 页面,components/ 组件,lib/ PDF·TTS·录音·TOC·音标表)
 shared/    前后端共享类型
-migrations/ D1 迁移(0001 MVP … 0015 每日阅读目标)
+migrations/ D1 迁移(0001 MVP … 0016 AI 调用失败原因)
 scripts/   Playwright 端到端自测(e2e.mjs)、IPA 录音抓取(fetch-ipa-audio.mjs)
 ```

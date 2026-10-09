@@ -731,7 +731,7 @@ api.get("/ai/stats", async (c) => {
   // 行数不多(一次调用一行),直接取回来在 JS 里算分位数:SQLite 没有 percentile 函数
   const { results } = await withAiSchema(c.env, () =>
     c.env.DB.prepare(
-      `SELECT provider, model, kind, latency_ms, ok, stream, created_at FROM ai_calls
+      `SELECT provider, model, kind, latency_ms, ok, stream, created_at, error FROM ai_calls
        WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 5000`
     )
       .bind(c.get("userId"), now() - days * 24 * 3600 * 1000)

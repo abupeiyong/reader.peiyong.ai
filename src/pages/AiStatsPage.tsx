@@ -171,11 +171,25 @@ export default function AiStatsPage() {
                         <span className="hint-text"> · {r.provider}</span>
                       </td>
                       <td>{fmtMs(r.latency_ms)}</td>
-                      <td>{r.ok ? "" : <span className="ai-failed">failed</span>}</td>
+                      <td>
+                        {r.ok ? (
+                          ""
+                        ) : (
+                          <>
+                            <span className="ai-failed">failed</span>
+                            {r.error && <span className="ai-error">{r.error}</span>}
+                          </>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <p className="hint-text ai-note">
+                Failed calls show the reason. Provider <code>none</code> means the call never left the Worker — no API
+                key was resolved, so the answer came from the offline mock; <code>workers-ai</code> rows are the
+                fallback that runs when the selected provider fails.
+              </p>
             </div>
           </>
         )}
