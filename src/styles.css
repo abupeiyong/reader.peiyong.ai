@@ -456,6 +456,8 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .vocab-item { border-bottom: 1px solid #efe9d9; }
 .vocab-row { display: flex; align-items: center; gap: 8px; padding: 9px 2px; cursor: pointer; }
 .vocab-row b { font-family: var(--serif); }
+/* 行里的美音音标:窄边栏里先让它省略,别把右边的释义挤没了 */
+.vocab-phonetic { max-width: 38%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vocab-meaning {
   color: var(--muted); font-size: 12.5px; flex: 1; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;

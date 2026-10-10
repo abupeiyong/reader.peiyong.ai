@@ -17,12 +17,32 @@ export default function VocabTab({ refreshNonce, onKnownWord, onStartReview }: P
   const [items, setItems] = useState<VocabItem[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
+  // 展开时按需补齐的释义(音标 + 例句),键是词条 id
+  const [exps, setExps] = useState<Record<string, WordExplanation>>({});
+  const [loadingId, setLoadingId] = useState<string | null>(null);
 
   const load = () => {
     api.get<VocabItem[]>("/api/vocab").then(setItems).catch(() => {});
   };
 
   useEffect(load, [refreshNonce]);
+
+  // 展开的词条缺音标 / 例句时按需生成(服务端会写回缓存);接口和复习卡共用一个
+  useEffect(() => {
+    const item = items.find((i) => i.id === expanded);
+    if (!item || exps[item.id] || isComplete(parseExp(item.explanation_json))) return;
+    let cancelled = false;
+    setLoadingId(item.id);
+    api
+      .post<WordExplanation>(`/api/review/${item.id}/explanation`, {})
+      .then((e) => !cancelled && setExps((m) => ({ ...m, [item.id]: e })))
+      .catch(() => {})
+      .finally(() => !cancelled && setLoadingId(null));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded]);
 
   const setStatus = async (item: VocabItem, status: string) => {
     await api.patch(`/api/vocab/${item.id}`, { status });
@@ -54,12 +74,15 @@ export default function VocabTab({ refreshNonce, onKnownWord, onStartReview }: P
         <div key={grp.key} className="vocab-day">
           <div className="vocab-day-h">{grp.label} · {grp.items.length}</div>
           {grp.items.map((item) => {
-            const exp = parseExp(item.explanation_json);
+            const exp = pickExp(exps[item.id], parseExp(item.explanation_json));
+            // 离线模拟的音标 / 例句是占位文本,别当真:展开时会重新生成
+            const real = exp?.source === "mock" ? null : exp;
             const open = expanded === item.id;
             return (
               <div key={item.id} className="vocab-item">
                 <div className="vocab-row" onClick={() => setExpanded(open ? null : item.id)}>
                   <b>{item.word}</b>
+                  {real?.phonetic && <span className="wp-phonetic vocab-phonetic">{real.phonetic}</span>}
                   <span className={`status-dot ${item.status}`} title={STATUS_LABEL[item.status]} />
                   <span className="vocab-meaning">{exp?.meaning_zh ?? ""}</span>
                   <button
@@ -77,6 +100,14 @@ export default function VocabTab({ refreshNonce, onKnownWord, onStartReview }: P
                   <div className="vocab-detail">
                     {item.context_sentence && <div className="vocab-context">“{item.context_sentence}”</div>}
                     {exp && <div className="wp-context">{exp.meaning_in_context}</div>}
+                    {loadingId === item.id && <div className="wp-loading">Generating phonetic and examples…</div>}
+                    {real?.examples?.length ? (
+                      <div className="wp-examples">
+                        {real.examples.map((ex, i) => (
+                          <div key={i}>{ex}</div>
+                        ))}
+                      </div>
+                    ) : null}
                     {item.page_no != null && <div className="wp-small">From page {item.page_no}</div>}
                     <div className="wp-small">{reviewLine(item)}</div>
                     <div className="vocab-actions">
@@ -136,6 +167,17 @@ function groupByDay(items: VocabItem[]): { key: string; label: string; items: Vo
     g.items.push(it);
   }
   return groups;
+}
+
+/** 展示用的释义:按需生成的那份更全,但生成退化成离线模拟时,还是用原来存的那份 */
+function pickExp(fresh: WordExplanation | undefined, stored: WordExplanation | null): WordExplanation | null {
+  if (!fresh) return stored;
+  return fresh.source === "mock" && stored ? stored : fresh;
+}
+
+/** 音标和例句都在才算完整 —— 缺了就得找服务端补(离线模拟的那份也不算) */
+function isComplete(exp: WordExplanation | null): boolean {
+  return !!exp && exp.source !== "mock" && !!exp.phonetic && !!exp.examples?.length;
 }
 
 function parseExp(json: string | null): WordExplanation | null {
