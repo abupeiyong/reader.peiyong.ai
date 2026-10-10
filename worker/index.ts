@@ -455,7 +455,7 @@ api.post("/review/:id", async (c) => {
   return c.json({ ok: true, ...outcome });
 });
 
-// 复习卡缺完整释义时按需生成并缓存(不写 word_events,避免干扰词汇模型)
+// 复习卡 / 生词本缺完整释义时按需生成并缓存(不写 word_events,避免干扰词汇模型)
 api.post("/review/:id/explanation", async (c) => {
   const userId = c.get("userId");
   const item = await c.env.DB.prepare(
@@ -467,8 +467,9 @@ api.post("/review/:id/explanation", async (c) => {
 
   if (item.explanation_json) {
     try {
-      const cached = JSON.parse(item.explanation_json);
-      if (cached.source !== "mock") return c.json(cached);
+      const cached = JSON.parse(item.explanation_json) as WordExplanation;
+      // 音标和例句缺一个都算不完整:生词本靠它们深入学这个词,旧记录在这里补齐一次
+      if (cached.source !== "mock" && cached.phonetic && cached.examples?.length) return c.json(cached);
     } catch {
       /* 缓存损坏则重新生成 */
     }
