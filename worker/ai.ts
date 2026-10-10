@@ -163,7 +163,7 @@ export async function explainWord(
   // 精简 prompt + verbosity low:输出 token 是延迟主因,实测比长版快 ~35%。
   // 查词默认还会关掉模型的「思考」(设置页可开),见 aiprovider.applyThinking。
   const prompt = `英语助手,用户水平 ${level}。结合句子解释单词,只返回 JSON:
-{"word":"原词","phonetic":"IPA 音标","pos":"本句词性","meaning_zh":"语境中文释义","meaning_in_context":"这句里的含义,中文1句","collocations":["2-3个常见搭配"],"forms":["主要词形变化"],"examples":["1个短英文例句(附中文)"]}
+{"word":"原词","phonetic":"美音 IPA 音标(General American,不要英音)","pos":"本句词性","meaning_zh":"语境中文释义","meaning_in_context":"这句里的含义,中文1句","collocations":["2-3个常见搭配"],"forms":["主要词形变化"],"examples":["1个短英文例句(附中文)"]}
 单词:"${word}" 句子:"${sentence}"`;
   const { text, reason } = await runLLM(
     env,
@@ -212,7 +212,7 @@ export async function analyzePage(
   const truncated = pageText.slice(0, 6000);
   const prompt = `你是英语阅读助手。用户英语水平:${level}。分析下面这一页英文文本,帮助中文母语者学习。只返回 JSON,不要多余文字,格式:
 {
-  "vocabulary": [{"word": "该水平学习者可能不认识的词(5-10个)", "phonetic": "/音标/", "meaning": "本页语境下的中文释义"}],
+  "vocabulary": [{"word": "该水平学习者可能不认识的词(5-10个)", "phonetic": "/美音 IPA 音标/", "meaning": "本页语境下的中文释义"}],
   "phrases": [{"phrase": "常用短语或固定搭配(3-6个)", "meaning": "中文含义"}],
   "sentences": [{"sentence": "本页中的长难句(1-3句,原文摘录)", "explanation": "中文解析:结构+含义"}],
   "background": "本页涉及的背景知识或延伸说明(中文,2-4句;没有就写空字符串)"
