@@ -1,0 +1,13 @@
+Charis SIL —— 音标用的字体 / the font used for phonetic transcriptions
+
+CharisSIL-Regular.woff2 是 Charis SIL 6.200 官方发布包里 web/ 目录下的文件,未作改动。
+CharisSIL-Regular.woff2 is the unmodified web/CharisSIL-Regular.woff2 from the official
+Charis SIL 6.200 release.
+
+  version: 6.200
+  source:  https://github.com/silnrsi/font-charis/releases/tag/v6.200
+  author:  SIL Global (https://software.sil.org/charis/)
+  license: SIL Open Font License 1.1 —— 全文见同目录的 OFL.txt / see OFL.txt in this folder
+
+选它的理由:Charis SIL 是为音标设计的字体,IPA 的全套符号(θ ð ʃ ʒ ŋ ɪ ɛ æ ɑ ɔ ʊ ʌ ɝ ə …)
+都有真正的字形,不像正文字体那样要靠别的字体凑。只入库 Regular 一个字重 —— 页面上的音标都不加粗。

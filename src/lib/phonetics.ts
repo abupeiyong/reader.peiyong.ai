@@ -1,4 +1,4 @@
-// 音标表:英音(RP)/ 美音(GA)各一套元音与双元音,辅音两套共用。
+// 音标表:美音(General American)的元音、双元音与辅音 —— 全站音标统一用美音 IPA。
 //
 // 发音怎么来:点音标放的是 Wikimedia Commons 上的 IPA 标准录音(真人发音,文件已入库在
 // public/phonetics/,见下面 RECORDINGS),不再交给 TTS —— IPA 直接丢给 TTS 会被逐字念成「slash i colon slash」,
@@ -25,16 +25,6 @@ export interface PhonemeGroup {
   items: Phoneme[];
 }
 
-export interface AccentChart {
-  /** TTS 口音,与 lib/speech.ts 的 Accent 对齐 */
-  accent: "GB" | "US";
-  label: string;
-  /** 单元音,画在元音图上 */
-  vowels: VowelPhoneme[];
-  /** 双元音,元音图上是一段滑动而非一个点,所以单列一组 */
-  diphthongs: Phoneme[];
-}
-
 // Wikimedia Commons 上的 IPA 发音录音(CC BY-SA 3.0,Denelson83 / Peter Isotalo 等录制),
 // 也就是维基百科各个辅音 / 元音条目在用的那几段。文件已经拉下来放在 public/phonetics/,
 // 跟站点一起发出去:反复点同一个音不用每次去 upload.wikimedia.org 取,也不会被它限流。
@@ -53,11 +43,11 @@ const OPEN_BACK = recording("Open_back_unrounded_vowel");
 const OPEN_MID_BACK_ROUNDED = recording("Open-mid_back_rounded_vowel");
 
 /**
- * 音标 → 标准录音。键是页面上显示的音标,所以英音 / 美音符号不同的(/iː/ 与 /i/)各记一条,
- * 符号相同的两边共用同一段录音。
+ * 音标 → 标准录音。键是音标符号:同一个音的不同写法(/iː/ 与 /i/)各记一条、指向同一段录音,
+ * 这样词典里怎么标都查得到。
  *
  * 录音录的是 IPA 的那个音,和英语音位不完全是一个东西,挑的时候按英语里的实际音值:
- * /ʌ/(STRUT)英美都更接近央元音 [ɐ] 而不是基本元音 [ʌ],/r/ 是齿后的 [ɹ̠] 而不是齿龈的 [ɹ]。
+ * /ʌ/(STRUT)更接近央元音 [ɐ] 而不是基本元音 [ʌ],/r/ 是齿后的 [ɹ̠] 而不是齿龈的 [ɹ]。
  * 辅音录的是夹在元音之间的那个音([aCa]),这也是维基百科音系条目的惯例。
  */
 const RECORDINGS: Record<string, string> = {
@@ -119,66 +109,34 @@ export const RECORDING_CREDIT = {
   filesHref: "/phonetics/CREDITS.txt",
 };
 
-const GB: AccentChart = {
-  accent: "GB",
-  label: "British",
-  vowels: [
-    { ipa: "iː", keyword: "sheep", examples: ["see", "sheep", "meat", "key"], x: 4, y: 4 },
-    { ipa: "ɪ", keyword: "ship", examples: ["ship", "bit", "busy", "gym"], x: 20, y: 18 },
-    { ipa: "e", keyword: "bed", examples: ["bed", "head", "said", "many"], x: 14, y: 42 },
-    { ipa: "æ", keyword: "cat", examples: ["cat", "hand", "apple", "man"], x: 26, y: 82 },
-    { ipa: "ɑː", keyword: "car", examples: ["car", "father", "start", "heart"], x: 86, y: 96 },
-    { ipa: "ɒ", keyword: "hot", examples: ["hot", "box", "want", "watch"], x: 97, y: 76 },
-    { ipa: "ɔː", keyword: "door", examples: ["door", "more", "law", "bought"], x: 94, y: 54 },
-    { ipa: "ʊ", keyword: "book", examples: ["book", "good", "put", "could"], x: 76, y: 20 },
-    { ipa: "uː", keyword: "food", examples: ["food", "blue", "rude", "who"], x: 96, y: 4 },
-    { ipa: "ʌ", keyword: "cup", examples: ["cup", "love", "son", "young"], x: 56, y: 72 },
-    { ipa: "ɜː", keyword: "bird", examples: ["bird", "her", "turn", "learn"], x: 44, y: 46 },
-    { ipa: "ə", keyword: "about", examples: ["about", "sofa", "teacher", "banana"], x: 64, y: 38 },
-  ],
-  diphthongs: [
-    { ipa: "eɪ", keyword: "day", examples: ["day", "name", "rain", "eight"] },
-    { ipa: "aɪ", keyword: "my", examples: ["my", "time", "light", "buy"] },
-    { ipa: "ɔɪ", keyword: "boy", examples: ["boy", "noise", "coin", "enjoy"] },
-    { ipa: "əʊ", keyword: "go", examples: ["go", "home", "show", "boat"] },
-    { ipa: "aʊ", keyword: "now", examples: ["now", "house", "out", "down"] },
-    { ipa: "ɪə", keyword: "here", examples: ["here", "near", "beer", "idea"] },
-    { ipa: "eə", keyword: "hair", examples: ["hair", "care", "there", "where"] },
-    { ipa: "ʊə", keyword: "tour", examples: ["tour", "pure", "cure", "Europe"] },
-  ],
-};
+/** 美音单元音,按舌位画在元音图上 */
+export const VOWELS: VowelPhoneme[] = [
+  { ipa: "i", keyword: "sheep", examples: ["see", "sheep", "meat", "key"], x: 4, y: 4 },
+  { ipa: "ɪ", keyword: "ship", examples: ["ship", "bit", "busy", "gym"], x: 20, y: 18 },
+  { ipa: "ɛ", keyword: "bed", examples: ["bed", "head", "said", "many"], x: 14, y: 42 },
+  { ipa: "æ", keyword: "cat", examples: ["cat", "hand", "apple", "man"], x: 26, y: 82 },
+  { ipa: "ɑ", keyword: "hot", examples: ["hot", "father", "box", "stop"], x: 88, y: 94 },
+  { ipa: "ɔ", keyword: "thought", examples: ["thought", "law", "dog", "bought"], x: 94, y: 56 },
+  { ipa: "ʊ", keyword: "book", examples: ["book", "good", "put", "could"], x: 76, y: 20 },
+  { ipa: "u", keyword: "food", examples: ["food", "blue", "rude", "who"], x: 96, y: 4 },
+  { ipa: "ʌ", keyword: "cup", examples: ["cup", "love", "son", "young"], x: 56, y: 72 },
+  { ipa: "ɝ", keyword: "bird", examples: ["bird", "her", "turn", "learn"], x: 44, y: 46 },
+  { ipa: "ə", keyword: "about", examples: ["about", "sofa", "teacher", "banana"], x: 64, y: 38 },
+];
 
-const US: AccentChart = {
-  accent: "US",
-  label: "American",
-  vowels: [
-    { ipa: "i", keyword: "sheep", examples: ["see", "sheep", "meat", "key"], x: 4, y: 4 },
-    { ipa: "ɪ", keyword: "ship", examples: ["ship", "bit", "busy", "gym"], x: 20, y: 18 },
-    { ipa: "ɛ", keyword: "bed", examples: ["bed", "head", "said", "many"], x: 14, y: 42 },
-    { ipa: "æ", keyword: "cat", examples: ["cat", "hand", "apple", "man"], x: 26, y: 82 },
-    { ipa: "ɑ", keyword: "hot", examples: ["hot", "father", "box", "stop"], x: 88, y: 94 },
-    { ipa: "ɔ", keyword: "thought", examples: ["thought", "law", "dog", "bought"], x: 94, y: 56 },
-    { ipa: "ʊ", keyword: "book", examples: ["book", "good", "put", "could"], x: 76, y: 20 },
-    { ipa: "u", keyword: "food", examples: ["food", "blue", "rude", "who"], x: 96, y: 4 },
-    { ipa: "ʌ", keyword: "cup", examples: ["cup", "love", "son", "young"], x: 56, y: 72 },
-    { ipa: "ɝ", keyword: "bird", examples: ["bird", "her", "turn", "learn"], x: 44, y: 46 },
-    { ipa: "ə", keyword: "about", examples: ["about", "sofa", "teacher", "banana"], x: 64, y: 38 },
-  ],
-  diphthongs: [
-    { ipa: "eɪ", keyword: "day", examples: ["day", "name", "rain", "eight"] },
-    { ipa: "aɪ", keyword: "my", examples: ["my", "time", "light", "buy"] },
-    { ipa: "ɔɪ", keyword: "boy", examples: ["boy", "noise", "coin", "enjoy"] },
-    { ipa: "oʊ", keyword: "go", examples: ["go", "home", "show", "boat"] },
-    { ipa: "aʊ", keyword: "now", examples: ["now", "house", "out", "down"] },
-  ],
-};
-
-export const ACCENT_CHARTS: AccentChart[] = [GB, US];
+/** 美音双元音:元音图上是一段滑动而非一个点,所以单列一组 */
+export const DIPHTHONGS: Phoneme[] = [
+  { ipa: "eɪ", keyword: "day", examples: ["day", "name", "rain", "eight"] },
+  { ipa: "aɪ", keyword: "my", examples: ["my", "time", "light", "buy"] },
+  { ipa: "ɔɪ", keyword: "boy", examples: ["boy", "noise", "coin", "enjoy"] },
+  { ipa: "oʊ", keyword: "go", examples: ["go", "home", "show", "boat"] },
+  { ipa: "aʊ", keyword: "now", examples: ["now", "house", "out", "down"] },
+];
 
 /** 元音图的梯形边框(viewBox 0 0 100 100):上沿闭元音,左沿前元音向下内收 */
 export const VOWEL_QUAD_POINTS = "0,0 100,0 100,100 30,100";
 
-/** 辅音按发音方式分组,英美通用 */
+/** 辅音按发音方式分组 */
 export const CONSONANT_GROUPS: PhonemeGroup[] = [
   {
     name: "Plosives",

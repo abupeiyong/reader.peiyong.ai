@@ -17,6 +17,18 @@
   --good: #3f6b52;
   --shadow: 0 2px 20px rgba(60, 48, 28, 0.10);
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Songti SC", "Source Han Serif SC", serif;
+  /* 音标专用:Charis SIL 为音标而设计,IPA 全套符号都有真字形,不用靠别的字体凑 */
+  --ipa: "Charis SIL", var(--serif);
+}
+
+/* 音标字体(入库在 public/fonts/,署名与许可见同目录 CREDITS.txt / OFL.txt)。
+   swap:字体没到之前先用衬线体顶上,音标不会先空一块再跳出来。 */
+@font-face {
+  font-family: "Charis SIL";
+  src: url("/fonts/CharisSIL-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
 }
 
 * { box-sizing: border-box; }
@@ -358,7 +370,7 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 @keyframes popIn { from { transform: translateY(4px); } }
 .wp-head { display: flex; align-items: center; gap: 8px; }
 .wp-word { font-size: 18px; font-weight: 700; font-family: var(--serif); }
-.wp-phonetic { color: var(--muted); font-size: 13px; }
+.wp-phonetic { color: var(--muted); font-size: 13px; font-family: var(--ipa); }
 .wp-close { margin-left: auto; }
 .wp-loading { color: var(--muted); padding: 14px 0; font-size: 13px; }
 .wp-body { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 44vh; overflow-y: auto; }
@@ -818,7 +830,7 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .ipa-tile:hover { border-color: var(--primary); color: var(--primary); }
 .ipa-tile.active { background: var(--primary); border-color: var(--primary); color: #fbf9f3; }
 
-.ipa-sym { font-family: var(--serif); font-size: 18px; line-height: 1.2; }
+.ipa-sym { font-family: var(--ipa); font-size: 18px; line-height: 1.2; }
 .ipa-key { font-size: 11px; opacity: 0.72; }
 
 /* 展开的例词 */
@@ -826,6 +838,8 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
   display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
   margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border);
 }
+/* 「再听一次」按钮上就是那个音标本身,也用音标字体 */
+.ipa-detail .btn { font-family: var(--ipa); }
 .ipa-words { display: flex; flex-wrap: wrap; gap: 8px; }
 .ipa-word {
   border: 1px solid var(--border); background: #fff; border-radius: 999px;

@@ -23,7 +23,7 @@ export interface Book {
 
 export interface WordExplanation {
   word: string;
-  phonetic: string;        // 音标,如 /ˈwɜːrd/
+  phonetic: string;        // 美音 IPA 音标,如 /ˈwɝd/
   pos: string;             // 词性
   meaning_zh: string;      // 当前语境中文释义
   meaning_in_context: string; // 原句中的具体含义说明(中文)

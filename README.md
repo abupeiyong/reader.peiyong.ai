@@ -44,22 +44,25 @@
 - SM-2 间隔重复闪卡
 
 **语音**
-- 单词/短语发音用有道词典录音(`dict.youdao.com/dictvoice`,美音 `type=2` / 英音 `type=1`),
+- 单词朗读与文章 TTS 一律用美音
+- 单词/短语发音用有道词典录音(`dict.youdao.com/dictvoice`,美音 `type=2`),
   查不到音的词(有道返回 500)回退 ElevenLabs;经 `/api/word-audio` 代理,不写 R2
 - 逐句/段落朗读用 ElevenLabs `eleven_v3`(melotts/浏览器兜底)
 - TTS 音频缓存在 R2(`tts/<口音>[-音色指纹]/<文本 sha256>.mp3`):同一句全局复用,
   命中约 10ms(未命中约 3-4s);换音色自动分桶,melotts 兜底结果不缓存
 
 **音标(`#/phonetics`)**
+- 全站音标统一用美音 IPA(General American),字体是为音标设计的 Charis SIL
+  (`public/fonts/CharisSIL-Regular.woff2`,随静态资源发布;署名与许可见同目录 CREDITS.txt / OFL.txt)
 - 元音按舌位画在元音图(梯形)上,双元音与辅音(爆破 / 摩擦 / 塞擦 / 鼻音 / 近音)分组列出
-- 点音标出声并展开例词,点例词逐词朗读;英音 / 美音一键切换(两边元音表不同,辅音共用)
+- 点音标出声并展开例词,点例词逐词朗读
 - 点音标放的是 Wikimedia Commons 上的 IPA 标准录音(真人发音,CC BY-SA 3.0,页面上署名),
   不走 TTS —— IPA 交给 TTS 会被逐字念成「slash i colon slash」,用「puh」这类拼法提示
   念出来的也不是那个音;录音按英语实际音值挑(`/ʌ/` 用央元音 [ɐ]、`/r/` 用齿后 [ɹ̠])
 - 37 段录音已拉下来入库放在 `public/phonetics/`(共约 1.2 MB,随静态资源发布),
   运行时不再请求 upload.wikimedia.org;署名清单在 `public/phonetics/CREDITS.txt`。
   清单以 `src/lib/phonetics.ts` 里的文件名为准,补录音后跑 `npm run fetch:ipa` 同步
-- 没有标准录音的(双元音、美音 `/ɝ/`)和录音取不到时,回退 TTS 念代表词;例词一直走 TTS
+- 没有标准录音的(双元音、`/ɝ/`)和录音取不到时,回退 TTS 念代表词;例词一直走 TTS
 
 **笔记、日历与报告(My Library)**
 - 每页记笔记(可基于选中文字)
@@ -92,6 +95,7 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 - `OPENAI_BASE_URL` / `DEEPSEEK_BASE_URL` 可在直连与兼容网关间切换
 - `public/standard_fonts` + `public/cmaps` 由 prebuild 钩子从 pdfjs-dist 同步
 - `public/phonetics/*.mp3` 是入库的 IPA 录音,`npm run fetch:ipa` 重拉(不进 prebuild:构建不依赖外网)
+- `public/fonts/CharisSIL-Regular.woff2` 是音标字体,Charis SIL 6.200 官方 web 包里的原文件(未改动)
 
 ## 目录结构
 ```
