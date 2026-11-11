@@ -43,7 +43,10 @@
     "OPENAI_CHAT_MODEL": "gpt-5-nano",
     // Telegram Bot:登录码 + 每日推送(token/webhook secret/owner chat id 走 wrangler secret)
     "TELEGRAM_BOT_USERNAME": "reader_peiyong_ai_bot",
-    "APP_URL": "https://reader.peiyong.ai"
+    "APP_URL": "https://reader.peiyong.ai",
+    // Hadi 小程序登录:只认这个 hub 签给这个小程序 id 的令牌(见 worker/hadi.ts);两项都删掉即关闭
+    "HADI_HUB_URL": "https://hadi.00ai.dev",
+    "HADI_APP_ID": "reader"
   },
   "triggers": {
     // 每小时触发,按用户设定的 UTC 小时推送每日复习提醒(Telegram)

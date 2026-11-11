@@ -2,6 +2,8 @@
 // 不可用时回退浏览器 speechSynthesis。段落逐句播放以保持句级高亮同步。
 // 单词/短语发音单独走 /api/word-audio(有道词典录音优先,取不到才落回同一条 TTS 链路)。
 
+import { apiFetch } from "../api";
+
 export type Accent = "US" | "GB";
 
 // ---------- 云端音频(单词走有道,句子走 ElevenLabs)----------
@@ -43,7 +45,7 @@ async function fetchAudioUrl(text: string, accent: Accent, kind: AudioKind = "se
 
   const task = (async () => {
     try {
-      const res = await fetch(audioEndpoint(text, accent, kind));
+      const res = await apiFetch(audioEndpoint(text, accent, kind));
       if (!res.ok) {
         if (res.status === 503 && kind === "sentence") cloudTtsAvailable = false; // 服务端无任何 TTS provider
         return null;

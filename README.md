@@ -97,11 +97,30 @@ Workers AI(嵌入/OCR/Whisper) · OpenAI gpt-5-nano / DeepSeek · ElevenLabs TTS
 - `public/phonetics/*.mp3` 是入库的 IPA 录音,`npm run fetch:ipa` 重拉(不进 prebuild:构建不依赖外网)
 - `public/fonts/CharisSIL-Regular.woff2` 是音标字体,Charis SIL 6.200 官方 web 包里的原文件(未改动)
 
+## Hadi 小程序
+同一份前端另打一个包,作为小程序跑在 Hadi(hadi.00ai.dev)里:id `reader`,只要 `identity` 一项权限。
+页面由 hub 托管,接口和 `public/` 下的静态资源仍在本站,书库与网页端是同一个。
+
+- 发布:`npm run hadi:publish`(= `npm run build:hadi` 打出 `dist-hadi/` + `hadi app publish dist-hadi`);
+  每次发布前先改 `hadi/hadi-app.json` 里的 `version`。前端改了要重新发布,只改后端不用
+- 登录:小程序用 `hadi.auth.token()` 向 hub 要一张令牌(ES256,`aud` = `reader`),到 `POST /api/auth/hadi`
+  换本站会话(12 小时,只放内存),之后每个请求带 `Authorization: Bearer`。Hadi 是单用户的,
+  换到的就是站长账号 —— 所以要先在网页端用 Telegram 登录过一次
+- 后端开关:`HADI_HUB_URL` + `HADI_APP_ID`(`wrangler.jsonc` 的 vars)。两项都在才认 Bearer、才对 `/api` 放开 CORS;
+  删掉即关闭。只认这个 hub 签给这个小程序 id 的令牌(`worker/hadi.ts`)
+- 沙箱 iframe 是 opaque origin、hub 托管的文件不带 CORS 头,所以这个包和网页端有三处不同(`vite.hadi.config.ts`):
+  打成普通脚本而不是 module;pdf.js 的 worker 以 classic 脚本内联;`public/_headers` 给字体 / cmap 加 CORS 头供跨源取
+- 新增接口调用一律用 `src/api.ts` 的 `api.*` / `apiFetch`,别直接 `fetch("/api/...")` —— 小程序里那样会打到 hub 上;
+  要登录才取得到的图片用 `<ApiImg>`
+- 本地自测:`scripts/hadi-e2e.mjs`(在 Hadi 的本地沙箱里走 登录 → 上传 → 阅读 → 查词,步骤见文件头)
+- 暗色主题还没做:`html[data-theme]` 会跟着 Hadi 变,但样式只有纸墨这一套
+
 ## 目录结构
 ```
-worker/    Hono API + auth.ts / jwt.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / youdao.ts / tts.ts / telegram.ts / vocabmodel.ts / review.ts
+hadi/      Hadi 小程序的清单与图标(hadi-app.json / icon.svg);打包配置在 vite.hadi.config.ts
+worker/    Hono API + auth.ts / jwt.ts / hadi.ts / logincode.ts / ai.ts / aiprovider.ts / openai.ts / elevenlabs.ts / youdao.ts / tts.ts / telegram.ts / vocabmodel.ts / review.ts
 src/       React 前端(pages/ 页面,components/ 组件,lib/ PDF·TTS·录音·TOC·音标表)
 shared/    前后端共享类型
 migrations/ D1 迁移(0001 MVP … 0016 AI 调用失败原因)
-scripts/   Playwright 端到端自测(e2e.mjs)、IPA 录音抓取(fetch-ipa-audio.mjs)
+scripts/   Playwright 端到端自测(e2e.mjs、hadi-e2e.mjs)、IPA 录音抓取(fetch-ipa-audio.mjs)
 ```

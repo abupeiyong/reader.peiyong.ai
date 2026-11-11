@@ -27,6 +27,9 @@
   ],
   "vars": {
     "APP_ENV": "dev",
-    "APP_ORIGIN": "http://localhost:5173"
+    "APP_ORIGIN": "http://localhost:5173",
+    // Hadi 小程序登录的本地自测:scripts/hadi-e2e.mjs 会在 4174 起一个假 hub 来签令牌
+    "HADI_HUB_URL": "http://127.0.0.1:4174",
+    "HADI_APP_ID": "reader"
   }
 }

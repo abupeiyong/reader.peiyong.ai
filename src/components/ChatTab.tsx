@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, streamChat } from "../api";
+import { api, apiFetch, streamChat } from "../api";
 import { startRecording, type RecorderController } from "../lib/recorder";
 import type { ChatMessage, ChatScope } from "../../shared/types";
 import { Icon } from "./Icon";
@@ -98,7 +98,7 @@ export default function ChatTab({ bookId, pageNo, selection, prefill, onJumpPage
         recRef.current = null;
         let text = "";
         try {
-          const res = await fetch("/api/speech/stt", { method: "POST", body: blob });
+          const res = await apiFetch("/api/speech/stt", { method: "POST", body: blob });
           if (res.ok) text = ((await res.json()) as { text: string }).text;
         } catch {
           /* ignore */
