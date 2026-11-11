@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import type { Env, Vars } from "./env";
 import { authRoutes, requireAuth } from "./auth";
+import { hadiEnabled } from "./hadi";
 import { uid, now, tokenizeWords } from "./util";
 import { explainWord, analyzePage, chatStream, transcribeAudio, embedTexts, ocrImage } from "./ai";
 import { speechMp3, wordMp3 } from "./tts";
@@ -49,6 +51,19 @@ import {
 } from "../shared/types";
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>();
+
+// Hadi 小程序跑在沙箱 iframe 里,请求的 Origin 是 null、不带 cookie,靠 Bearer 认证,
+// 所以要对任意来源放开 CORS。只在开了 Hadi 登录时放开;不带 Allow-Credentials,
+// 别的站点拿不到本站 cookie 会话的响应,网页端的安全边界不变。
+app.use(
+  "/api/*",
+  cors({
+    origin: (_origin, c) => (hadiEnabled(c.env as Env) ? "*" : null),
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowHeaders: ["Authorization", "Content-Type"],
+    maxAge: 86400,
+  })
+);
 
 app.route("/api/auth", authRoutes);
 

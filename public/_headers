@@ -1,0 +1,9 @@
+# Hadi 小程序(页面由 hub 托管,沙箱 iframe 的 Origin 是 null)要跨源从本站取这几类静态资源:
+# 字体和 pdf.js 的 cmap / 标准字体都是 fetch / @font-face 取的,必须带 CORS 头才读得到。
+# 都是公开文件,放开给任意来源没有风险。音标录音走 <audio>,不需要 CORS。
+/fonts/*
+  Access-Control-Allow-Origin: *
+/cmaps/*
+  Access-Control-Allow-Origin: *
+/standard_fonts/*
+  Access-Control-Allow-Origin: *

@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "build:hadi": "vite build --config vite.hadi.config.ts",
+    "hadi:publish": "npm run build:hadi && hadi app publish dist-hadi",
     "deploy": "npm run build && wrangler deploy -c dist/reader_peiyong_ai/wrangler.json",
     "db:migrate:local": "wrangler d1 migrations apply reader-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply reader-db --remote",

@@ -7,9 +7,13 @@ import { uid, now } from "./util";
 import { telegramEnabled, sendMessage, getBotUsername } from "./telegram";
 import { issueLoginCode, verifyLoginCode, ownerChatId, chatAllowed, CODE_TTL } from "./logincode";
 import { looksLikeJwt, signSessionJwt, verifySessionJwt } from "./jwt";
+import { hadiEnabled, verifyHadiToken } from "./hadi";
 
 const SESSION_TTL = 30 * 24 * 3600 * 1000; // 30 天
 const RENEW_AFTER = SESSION_TTL / 2;       // 剩余不足一半时滑动续期
+// Hadi 小程序换到的会话:只活在小程序的内存里,过期了它自己拿新的 Hadi 令牌再换,
+// 所以不用给 30 天(签名令牌没法逐个撤销,短一点更稳妥)。
+const HADI_SESSION_TTL = 12 * 3600 * 1000;
 const COOKIE = "sid";
 const TICKET_COOKIE = "lgt";
 
@@ -23,12 +27,12 @@ function devLoginEnabled(env: Env): boolean {
  * 会话 token。默认签一张 JWT:之后每次请求验签即可,不用查 sessions 表。
  * 没有签名密钥时(生产未配任何 secret)退回库里的随机会话,行为与改动前一致。
  */
-async function createSession(env: Env, userId: string): Promise<string> {
-  const jwt = await signSessionJwt(env, userId, SESSION_TTL);
+async function createSession(env: Env, userId: string, ttl = SESSION_TTL): Promise<string> {
+  const jwt = await signSessionJwt(env, userId, ttl);
   if (jwt) return jwt;
   const token = uid("sess");
   await env.DB.prepare("INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
-    .bind(token, userId, now() + SESSION_TTL, now())
+    .bind(token, userId, now() + ttl, now())
     .run();
   return token;
 }
@@ -61,6 +65,17 @@ async function userForChat(env: Env, chatId: string): Promise<string> {
     "INSERT INTO users (id, email, name, telegram_chat_id, tg_daily_enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)"
   )
     .bind(id, `tg${chatId}@telegram.local`, "Reader", chatId, now())
+    .run();
+  return id;
+}
+
+/** 邮箱 → 账号(仅本地开发用):没有就建一个 */
+async function userForEmail(env: Env, email: string, name: string): Promise<string> {
+  const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first<{ id: string }>();
+  if (existing) return existing.id;
+  const id = uid("u");
+  await env.DB.prepare("INSERT INTO users (id, email, name, created_at) VALUES (?, ?, ?, ?)")
+    .bind(id, email, name, now())
     .run();
   return id;
 }
@@ -128,16 +143,33 @@ authRoutes.post("/dev-login", async (c) => {
   const body: { email?: string; name?: string } = await c.req.json().catch(() => ({}));
   const email = (body.email || "").trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return c.json({ error: "请输入有效邮箱" }, 400);
-  const existing = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first<{ id: string }>();
-  let userId = existing?.id;
-  if (!userId) {
-    userId = uid("u");
-    await c.env.DB.prepare("INSERT INTO users (id, email, name, created_at) VALUES (?, ?, ?, ?)")
-      .bind(userId, email, body.name ?? email.split("@")[0], now())
-      .run();
-  }
+  const userId = await userForEmail(c.env, email, body.name ?? email.split("@")[0]);
   setSessionCookie(c, await createSession(c.env, userId));
   return c.json({ ok: true });
+});
+
+// Hadi 小程序登录:拿 hub 签发的应用令牌换本站会话。
+// 小程序在沙箱 iframe 里带不了 cookie,所以会话放在响应体里,由它之后用 Authorization: Bearer 带上。
+// Hadi 是单用户的(令牌 sub 恒为 owner),本站也只有站长一个账号 —— 直接落到站长账号上,
+// 和 Telegram 登录进的是同一个书库。
+authRoutes.post("/hadi", async (c) => {
+  if (!hadiEnabled(c.env)) return c.json({ error: "Hadi sign-in is not configured." }, 404);
+  const body: { token?: unknown } = await c.req.json().catch(() => ({}));
+  const claims = await verifyHadiToken(c.env, typeof body.token === "string" ? body.token : "");
+  if ("error" in claims) return c.json({ error: claims.error }, 401);
+
+  let userId: string;
+  const chatId = await ownerChatId(c.env);
+  if (chatId) {
+    userId = await userForChat(c.env, chatId);
+  } else if (devLoginEnabled(c.env)) {
+    // 本地开发没有 Telegram 账号:落到一个固定的本地账号上,便于在沙箱里自测
+    userId = await userForEmail(c.env, "hadi-owner@hadi.local", claims.name ?? "Hadi owner");
+  } else {
+    return c.json({ error: "No owner account yet. Sign in once on the website with Telegram first." }, 403);
+  }
+  const expiresAt = now() + HADI_SESSION_TTL;
+  return c.json({ token: await createSession(c.env, userId, HADI_SESSION_TTL), expires_at: expiresAt });
 });
 
 authRoutes.post("/logout", async (c) => {
@@ -152,11 +184,19 @@ authRoutes.post("/logout", async (c) => {
   return c.json({ ok: true });
 });
 
-/** 认证中间件:解析 cookie → userId,未登录返回 401;活跃会话滑动续期 */
+/** Authorization: Bearer <token>(Hadi 小程序用;浏览器里的网页端走 cookie) */
+function bearerToken(c: Context): string | null {
+  const m = /^Bearer\s+(\S+)$/i.exec(c.req.header("Authorization") ?? "");
+  return m ? m[1] : null;
+}
+
+/** 认证中间件:解析 cookie(或 Bearer)→ userId,未登录返回 401;cookie 会话滑动续期 */
 import { createMiddleware } from "hono/factory";
 
 export const requireAuth = createMiddleware<{ Bindings: Env; Variables: Vars }>(async (c, next) => {
-  const token = getCookie(c, COOKIE);
+  // Bearer 只在开了 Hadi 登录时才认:没开的部署上,会话令牌仍然只能从 cookie 来
+  const bearer = hadiEnabled(c.env) ? bearerToken(c) : null;
+  const token = bearer ?? getCookie(c, COOKIE);
   if (!token) return c.json({ error: "unauthorized" }, 401);
 
   // 签名令牌:验签 + 看过期,一次 D1 都不用
@@ -166,6 +206,8 @@ export const requireAuth = createMiddleware<{ Bindings: Env; Variables: Vars }>(
     c.set("userId", claims.sub);
     await next();
 
+    // Bearer 会话不续期:续期靠 Set-Cookie,而小程序收不到 cookie —— 它过期后自己重新换
+    if (bearer) return;
     // 剩余不足一半时换一张新令牌(同样不写库)
     if (claims.exp - now() >= RENEW_AFTER) return;
     const fresh = await signSessionJwt(c.env, claims.sub, SESSION_TTL);
@@ -185,6 +227,7 @@ export const requireAuth = createMiddleware<{ Bindings: Env; Variables: Vars }>(
   if (!row || row.expires_at < now()) return c.json({ error: "unauthorized" }, 401);
   c.set("userId", row.user_id);
   await next();
+  if (bearer) return; // 同上:Bearer 会话不靠 Set-Cookie 续期
 
   // 老会话直接换成签名令牌:下一个请求起就不用再查 sessions 了。
   // 签不出来(没有密钥)时保持原来的滑动续期逻辑。

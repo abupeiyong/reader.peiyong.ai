@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api";
+import { api, apiFetch, apiPdfSource } from "../api";
+import { setHadiTitle } from "../hadi";
 import type { PageAnalysis, ReadingToday, User } from "../../shared/types";
 import { pdfjs, loadPdf, type PDFDocumentProxy } from "../lib/pdf";
 import { extractPage, splitSentences, type Paragraph } from "../lib/pdfText";
@@ -94,6 +95,7 @@ export default function ReaderPage({
         const meta = await api.get<BookMeta>(`/api/books/${bookId}`);
         if (cancelled) return;
         setBook(meta);
+        setHadiTitle(meta.title);
         const progress = await api.get<{ page_no: number; zoom: number }>(`/api/books/${bookId}/progress`);
         if (cancelled) return;
         setPageNo(Math.max(1, progress.page_no));
@@ -103,7 +105,7 @@ export default function ReaderPage({
         }
         const known = await api.get<string[]>("/api/known-words");
         if (!cancelled) setKnownWords(new Set(known));
-        const loaded = await loadPdf({ url: `/api/books/${bookId}/file` }).promise;
+        const loaded = await loadPdf(await apiPdfSource(`/api/books/${bookId}/file`)).promise;
         if (cancelled) {
           void loaded.destroy();
           return;
@@ -169,7 +171,7 @@ export default function ReaderPage({
 
     const save = (keepalive: boolean): Promise<void> => {
       if (!sessionId) return Promise.resolve();
-      return fetch(`/api/reading-sessions/${sessionId}`, {
+      return apiFetch(`/api/reading-sessions/${sessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active_ms: active, idle_ms: idle, pauses }),
@@ -340,7 +342,7 @@ export default function ReaderPage({
       await page.render({ canvasContext: canvas.getContext("2d")!, viewport }).promise;
       const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/png"));
       if (!blob) throw new Error("Could not render the page image");
-      const res = await fetch(`/api/books/${bookId}/pages/${pageNo}/ocr`, { method: "POST", body: blob });
+      const res = await apiFetch(`/api/books/${bookId}/pages/${pageNo}/ocr`, { method: "POST", body: blob });
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(j.error ?? `OCR failed (${res.status})`);

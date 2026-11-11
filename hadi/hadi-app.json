@@ -1,0 +1,9 @@
+{
+    "id": "reader",
+    "name": "沉浸阅读",
+    "version": "1.0.0",
+    "description": "reader.peiyong.ai:英文 PDF 深度阅读 —— 点词查义、听书、生词复习、音标,和网页端是同一个书库。",
+    "icon": "icon.svg",
+    "entry": "index.html",
+    "permissions": ["identity"]
+}

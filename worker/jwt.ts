@@ -50,7 +50,7 @@ function b64urlJson(value: unknown): string {
   return b64url(enc.encode(JSON.stringify(value)));
 }
 
-function fromB64url(s: string): Uint8Array {
+export function fromB64url(s: string): Uint8Array {
   const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
   const bin = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
   return Uint8Array.from(bin, (ch) => ch.charCodeAt(0));

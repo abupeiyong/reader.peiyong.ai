@@ -4,6 +4,8 @@
 // public/phonetics/,见下面 RECORDINGS),不再交给 TTS —— IPA 直接丢给 TTS 会被逐字念成「slash i colon slash」,
 // 退一步用「puh」这类拼法提示念出来的也不是这个音。没有标准录音的(双元音、美音 /ɝ/)
 // 以及录音取不到时,才回退 TTS 念代表词 —— 那至少是个发音正确的真词。
+import { assetUrl } from "../hadi";
+
 export interface Phoneme {
   /** IPA 符号,不带两侧斜杠 */
   ipa: string;
@@ -34,7 +36,7 @@ export interface PhonemeGroup {
 // 要补或者换录音:在这里写上 Commons 的文件名(不带 .ogg),再跑 `npm run fetch:ipa` ——
 // scripts/fetch-ipa-audio.mjs 以这份清单为准去下载并刷新 CREDITS.txt。
 function recording(file: string): string {
-  return `/phonetics/${file}.mp3`;
+  return assetUrl(`/phonetics/${file}.mp3`);
 }
 
 const CLOSE_FRONT = recording("Close_front_unrounded_vowel");
@@ -106,7 +108,7 @@ export const RECORDING_CREDIT = {
   text: "Wikimedia Commons · CC BY-SA 3.0",
   href: "https://commons.wikimedia.org/wiki/Category:Phonemes",
   /** 逐个文件的作者 / 许可,由 npm run fetch:ipa 生成 */
-  filesHref: "/phonetics/CREDITS.txt",
+  filesHref: assetUrl("/phonetics/CREDITS.txt"),
 };
 
 /** 美音单元音,按舌位画在元音图上 */

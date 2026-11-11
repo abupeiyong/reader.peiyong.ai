@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { IS_HADI } from "../hadi";
 import type { Book, User } from "../../shared/types";
 import { loadPdf } from "../lib/pdf";
 import { extractAllPages } from "../lib/pdfText";
@@ -7,6 +8,7 @@ import StatsPanel from "../components/StatsPanel";
 import CalendarPanel from "../components/CalendarPanel";
 import ReviewModal from "../components/ReviewModal";
 import TelegramCard from "../components/TelegramCard";
+import ApiImg from "../components/ApiImg";
 import { Icon } from "../components/Icon";
 
 export default function LibraryPage({
@@ -89,7 +91,8 @@ export default function LibraryPage({
           <span>{user.name || user.email}</span>
           <a className="btn btn-ghost" href="#/phonetics"><Icon name="volume" /> Phonetics</a>
           <a className="btn btn-ghost" href="#/settings"><Icon name="settings" /> Settings</a>
-          <button className="btn btn-ghost" onClick={logout}>Sign out</button>
+          {/* Hadi 小程序里没有「退出」:身份跟着 Hadi 走,退了下次打开又自动登上 */}
+          {!IS_HADI && <button className="btn btn-ghost" onClick={logout}>Sign out</button>}
         </div>
       </header>
 
@@ -128,7 +131,7 @@ export default function LibraryPage({
             <div key={b.id} className="book-card" onClick={() => (location.hash = `#/read/${b.id}`)}>
               <div className="book-cover">
                 {b.cover_key ? (
-                  <img
+                  <ApiImg
                     className="book-cover-img"
                     src={`/api/books/${b.id}/cover?v=${encodeURIComponent(b.cover_key)}`}
                     alt=""
@@ -251,7 +254,7 @@ function EditBookModal({
         <div className="edit-body">
           <div className="edit-cover">
             {coverKey ? (
-              <img src={`/api/books/${book.id}/cover?v=${encodeURIComponent(coverKey)}`} alt="" />
+              <ApiImg src={`/api/books/${book.id}/cover?v=${encodeURIComponent(coverKey)}`} alt="" />
             ) : (
               <Icon name="book" size={30} />
             )}

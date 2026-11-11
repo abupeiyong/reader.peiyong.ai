@@ -27,6 +27,9 @@ export interface Env {
   TELEGRAM_WEBHOOK_SECRET?: string; // 校验 webhook 来源
   TELEGRAM_OWNER_CHAT_ID?: string;  // 唯一允许登录的 chat;留空则取库里已绑定的唯一账号
   APP_URL?: string;                 // 站点地址(推送里带链接),默认 APP_ORIGIN
+  // Hadi 小程序登录(见 hadi.ts):两个都配了才开启,同时放开 /api 的 CORS
+  HADI_HUB_URL?: string;            // 签发令牌的 hub,如 https://hadi.00ai.dev(同时是 iss)
+  HADI_APP_ID?: string;             // 小程序 id(令牌的 aud),如 reader
 }
 
 export interface Vars {
